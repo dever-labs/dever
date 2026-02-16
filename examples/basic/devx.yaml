@@ -1,0 +1,23 @@
+version: 1
+
+project:
+  name: my-app
+  defaultProfile: local
+
+profiles:
+  local:
+    services:
+      api:
+        image: "nginx:alpine"
+        ports:
+          - "8080:80"
+        dependsOn: [db]
+
+    deps:
+      db:
+        kind: postgres
+        version: "16"
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        volume: "db-data:/var/lib/postgresql/data"

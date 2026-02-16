@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "devx manifest",
+  "type": "object",
+  "required": ["version", "project", "profiles"],
+  "properties": {
+    "version": {
+      "type": "integer",
+      "enum": [1]
+    },
+    "project": {
+      "type": "object",
+      "required": ["name", "defaultProfile"],
+      "properties": {
+        "name": {"type": "string"},
+        "defaultProfile": {"type": "string"}
+      }
+    },
+    "registry": {
+      "type": "object",
+      "properties": {
+        "prefix": {"type": "string"}
+      }
+    },
+    "profiles": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "services": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "properties": {
+                "image": {"type": "string"},
+                "build": {
+                  "type": "object",
+                  "properties": {
+                    "context": {"type": "string"},
+                    "dockerfile": {"type": "string"}
+                  }
+                },
+                "ports": {"type": "array", "items": {"type": "string"}},
+                "env": {"type": "object", "additionalProperties": {"type": "string"}},
+                "command": {"type": "array", "items": {"type": "string"}},
+                "workdir": {"type": "string"},
+                "mount": {"type": "array", "items": {"type": "string"}},
+                "dependsOn": {"type": "array", "items": {"type": "string"}},
+                "health": {
+                  "type": "object",
+                  "properties": {
+                    "httpGet": {"type": "string"},
+                    "interval": {"type": "string"},
+                    "retries": {"type": "integer"}
+                  }
+                }
+              }
+            }
+          },
+          "deps": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "required": ["kind"],
+              "properties": {
+                "kind": {"type": "string"},
+                "version": {"type": "string"},
+                "env": {"type": "object", "additionalProperties": {"type": "string"}},
+                "ports": {"type": "array", "items": {"type": "string"}},
+                "volume": {"type": "string"}
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
