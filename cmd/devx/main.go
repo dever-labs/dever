@@ -19,6 +19,7 @@ import (
     "github.com/dever-labs/devx/internal/config"
     "github.com/dever-labs/devx/internal/doctor"
     "github.com/dever-labs/devx/internal/graph"
+    "github.com/dever-labs/devx/internal/k8s"
     "github.com/dever-labs/devx/internal/lock"
     "github.com/dever-labs/devx/internal/runtime"
     "github.com/dever-labs/devx/internal/ui"
@@ -28,6 +29,7 @@ const (
     manifestFile = "devx.yaml"
     devxDir      = ".devx"
     composeFile  = "compose.yaml"
+    k8sFile      = "k8s.yaml"
     stateFile    = "state.json"
     lockFile     = "devx.lock"
 )
@@ -94,6 +96,7 @@ func printUsage() {
     fmt.Println("  devx exec <service> -- <cmd...>")
     fmt.Println("  devx doctor [--fix]")
     fmt.Println("  devx render compose [--write] [--no-telemetry]")
+    fmt.Println("  devx render k8s [--profile name] [--namespace ns] [--write]")
     fmt.Println("  devx lock update")
 }
 
@@ -147,6 +150,11 @@ func runUp(ctx context.Context, args []string) error {
         return err
     }
 
+    runtimeMode := profileRuntime(prof)
+    if runtimeMode == "k8s" {
+        return runUpK8s(ctx, manifest, profName, prof)
+    }
+
     composePath := filepath.Join(devxDir, composeFile)
     enableTelemetry := !*noTelemetry
     if err := writeCompose(composePath, manifest, profName, prof, lockfile, enableTelemetry); err != nil {
@@ -183,6 +191,11 @@ func runDown(ctx context.Context, args []string) error {
     }
 
     enableTelemetry := telemetryFromState()
+    runtimeMode := profileRuntime(prof)
+    if runtimeMode == "k8s" {
+        return runDownK8s(ctx)
+    }
+
     composePath := filepath.Join(devxDir, composeFile)
     if !fileExists(composePath) {
         if err := ensureDevxDir(); err != nil {
@@ -203,6 +216,10 @@ func runStatus(ctx context.Context, args []string) error {
     manifest, profName, prof, err := loadProfile("")
     if err != nil {
         return err
+    }
+
+    if profileRuntime(prof) == "k8s" {
+        return errors.New("status for k8s runtime is not supported yet")
     }
 
     rt, err := runtime.SelectRuntime(ctx)
@@ -252,6 +269,10 @@ func runLogs(ctx context.Context, args []string) error {
     manifest, profName, prof, err := loadProfile("")
     if err != nil {
         return err
+    }
+
+    if profileRuntime(prof) == "k8s" {
+        return errors.New("logs for k8s runtime are not supported yet")
     }
 
     rt, err := runtime.SelectRuntime(ctx)
@@ -306,6 +327,10 @@ func runExec(ctx context.Context, args []string) error {
         return err
     }
 
+    if profileRuntime(prof) == "k8s" {
+        return errors.New("exec for k8s runtime is not supported yet")
+    }
+
     rt, err := runtime.SelectRuntime(ctx)
     if err != nil {
         return err
@@ -349,9 +374,44 @@ func runDoctor(ctx context.Context, args []string) error {
     return nil
 }
 
+func runUpK8s(ctx context.Context, manifest *config.Manifest, profName string, prof *config.Profile) error {
+    output, err := k8s.Render(manifest, profName, prof, "")
+    if err != nil {
+        return err
+    }
+
+    if err := ensureDevxDir(); err != nil {
+        return err
+    }
+    path := filepath.Join(devxDir, k8sFile)
+    if err := os.WriteFile(path, []byte(output), 0644); err != nil {
+        return err
+    }
+
+    if err := k8s.Apply(ctx, path); err != nil {
+        return err
+    }
+
+    _ = writeState(state{Profile: profName, Runtime: "k8s", Telemetry: false})
+    fmt.Println("Kubernetes resources applied")
+    return nil
+}
+
+func runDownK8s(ctx context.Context) error {
+    path := filepath.Join(devxDir, k8sFile)
+    if !fileExists(path) {
+        return fmt.Errorf("%s not found; run 'devx render k8s --write' or 'devx up --profile <k8s profile>'", path)
+    }
+    if err := k8s.Delete(ctx, path); err != nil {
+        return err
+    }
+    fmt.Println("Kubernetes resources deleted")
+    return nil
+}
+
 func runRender(ctx context.Context, args []string) error {
     if len(args) == 0 || args[0] != "compose" {
-        return errors.New("render requires 'compose'")
+        return runRenderK8s(ctx, args)
     }
 
     fs := flag.NewFlagSet("render", flag.ExitOnError)
@@ -380,6 +440,38 @@ func runRender(ctx context.Context, args []string) error {
     }
 
     fmt.Print(composed)
+    return nil
+}
+
+func runRenderK8s(ctx context.Context, args []string) error {
+    if len(args) == 0 || args[0] != "k8s" {
+        return errors.New("render requires 'compose' or 'k8s'")
+    }
+
+    fs := flag.NewFlagSet("render-k8s", flag.ExitOnError)
+    profile := fs.String("profile", "", "Profile to use")
+    namespace := fs.String("namespace", "", "Kubernetes namespace")
+    write := fs.Bool("write", false, "Write to .devx/k8s.yaml")
+    _ = fs.Parse(args[1:])
+
+    manifest, profName, prof, err := loadProfile(*profile)
+    if err != nil {
+        return err
+    }
+
+    output, err := k8s.Render(manifest, profName, prof, *namespace)
+    if err != nil {
+        return err
+    }
+
+    if *write {
+        if err := ensureDevxDir(); err != nil {
+            return err
+        }
+        return os.WriteFile(filepath.Join(devxDir, k8sFile), []byte(output), 0644)
+    }
+
+    fmt.Print(output)
     return nil
 }
 
@@ -490,6 +582,13 @@ func buildCompose(manifest *config.Manifest, profName string, prof *config.Profi
     }
 
     return compose.Render(manifest, profName, prof, rewrite, enableTelemetry)
+}
+
+func profileRuntime(prof *config.Profile) string {
+    if prof == nil || prof.Runtime == "" {
+        return "compose"
+    }
+    return prof.Runtime
 }
 
 func ensureDevxDir() error {

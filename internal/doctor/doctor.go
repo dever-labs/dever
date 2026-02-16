@@ -11,6 +11,7 @@ import (
     "strings"
 
     "github.com/dever-labs/devx/internal/config"
+    "github.com/dever-labs/devx/internal/k8s"
     "github.com/dever-labs/devx/internal/runtime"
 )
 
@@ -72,6 +73,9 @@ func Run(ctx context.Context, opts Options) Report {
         checks = append(checks, checkPortConflicts(opts.Manifest))
         if opts.Manifest.Registry.Prefix != "" {
             checks = append(checks, checkRegistry(opts.Manifest.Registry.Prefix))
+        }
+        if requiresK8s(opts.Manifest) {
+            checks = append(checks, checkKubectl())
         }
     }
 
@@ -149,4 +153,21 @@ func checkRegistry(prefix string) Check {
     }
 
     return Check{Name: "Registry", Status: "PASS", Detail: "registry reachable"}
+}
+
+func requiresK8s(manifest *config.Manifest) bool {
+    for _, profile := range manifest.Profiles {
+        if profile.Runtime == "k8s" {
+            return true
+        }
+    }
+    return false
+}
+
+func checkKubectl() Check {
+    if err := k8s.DetectKubectl(); err != nil {
+        return Check{Name: "kubectl", Status: "WARN", Detail: "kubectl not found"}
+    }
+
+    return Check{Name: "kubectl", Status: "PASS", Detail: "kubectl available"}
 }

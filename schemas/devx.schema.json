@@ -27,6 +27,10 @@
       "additionalProperties": {
         "type": "object",
         "properties": {
+          "runtime": {
+            "type": "string",
+            "enum": ["compose", "k8s"]
+          },
           "services": {
             "type": "object",
             "additionalProperties": {

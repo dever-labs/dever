@@ -26,6 +26,7 @@ type Registry struct {
 type Profile struct {
     Services map[string]Service `yaml:"services"`
     Deps     map[string]Dep     `yaml:"deps"`
+    Runtime  string             `yaml:"runtime"`
 }
 
 type Service struct {

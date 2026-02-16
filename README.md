@@ -20,6 +20,7 @@ A cross-platform dev orchestrator CLI for any repo. Single-binary, container-fir
 - `devx exec <service> -- <cmd...>`
 - `devx doctor [--fix]`
 - `devx render compose [--write]`
+- `devx render k8s [--profile name] [--namespace ns] [--write]`
 - `devx lock update`
 
 ## Telemetry (Aspire-lite)
@@ -36,6 +37,26 @@ Disable telemetry with `devx up --no-telemetry`. Use `devx status` to see the Gr
 - `devx up` will use digest-pinned images when devx.lock is present.
 
 ## Build
+## Kubernetes
+
+Render Kubernetes manifests for a profile:
+
+```sh
+devx render k8s --profile local --write
+```
+
+This emits `.devx/k8s.yaml` with Deployments and Services. For services that use `build`, you must provide an `image` for k8s rendering. Bind mounts are not supported in k8s render.
+
+To run Kubernetes with the same `devx up/down` commands, set the profile runtime:
+
+```yaml
+profiles:
+	k8s:
+		runtime: k8s
+		services: {}
+```
+
+Then `devx up --profile k8s` applies via `kubectl`, and `devx down --profile k8s` deletes the resources.
 
 ```sh
 go build ./cmd/devx

@@ -27,3 +27,24 @@ devx writes generated files to `.devx/`.
 devx starts Grafana + Loki + Prometheus automatically. Grafana is published on a random host port to avoid conflicts; Loki and Prometheus are internal only.
 
 Disable telemetry with `devx up --no-telemetry`. Check `devx status` for the published Grafana port.
+
+## Kubernetes
+
+Render Kubernetes manifests from a profile:
+
+```sh
+devx render k8s --profile local --write
+```
+
+This writes `.devx/k8s.yaml` with Deployments and Services. Services that use `build` must define an `image`. Bind mounts are not supported in k8s render.
+
+To use the same `devx up/down` commands for Kubernetes, set the profile runtime:
+
+```yaml
+profiles:
+	k8s:
+		runtime: k8s
+		services: {}
+```
+
+Then `devx up --profile k8s` runs `kubectl apply -f .devx/k8s.yaml`, and `devx down --profile k8s` runs `kubectl delete -f .devx/k8s.yaml`.

@@ -67,6 +67,9 @@ func ValidateProfile(m *Manifest, profile string) error {
     }
 
     var issues []string
+    if prof.Runtime != "" && prof.Runtime != "compose" && prof.Runtime != "k8s" {
+        issues = append(issues, fmt.Sprintf("profile '%s' runtime must be compose or k8s", profile))
+    }
     for name, svc := range prof.Services {
         if svc.Image == "" && svc.Build == nil {
             issues = append(issues, fmt.Sprintf("service '%s' must define image or build", name))

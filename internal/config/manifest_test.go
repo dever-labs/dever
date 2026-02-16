@@ -9,6 +9,7 @@ project:
   defaultProfile: local
 profiles:
   local:
+        runtime: compose
     services:
       api:
         image: nginx:alpine
@@ -44,4 +45,27 @@ profiles: {}
     if err := Validate(m); err == nil {
         t.Fatalf("expected validation error")
     }
+}
+
+func TestValidateProfileRuntime(t *testing.T) {
+        data := []byte(`version: 1
+project:
+    name: my-app
+    defaultProfile: local
+profiles:
+    local:
+        runtime: bad
+        services:
+            api:
+                image: nginx:alpine
+`)
+
+        m, err := Parse(data)
+        if err != nil {
+                t.Fatalf("parse failed: %v", err)
+        }
+
+        if err := ValidateProfile(m, "local"); err == nil {
+                t.Fatalf("expected runtime validation error")
+        }
 }
