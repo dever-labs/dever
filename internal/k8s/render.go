@@ -3,11 +3,11 @@ package k8s
 import (
 	"bytes"
 	"fmt"
-	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/dever-labs/devx/internal/config"
+	"github.com/dever-labs/devx/internal/util"
 	"gopkg.in/yaml.v3"
 )
 
@@ -107,7 +107,7 @@ func Render(manifest *config.Manifest, profileName string, profile *config.Profi
 	var docs []any
 	project := sanitizeName(manifest.Project.Name)
 
-	for _, name := range sortedKeys(profile.Services) {
+	for _, name := range util.SortedKeys(profile.Services) {
 		svc := profile.Services[name]
 		if svc.Build != nil && svc.Image == "" {
 			return "", fmt.Errorf("service '%s' requires image for k8s render", name)
@@ -158,7 +158,7 @@ func Render(manifest *config.Manifest, profileName string, profile *config.Profi
 		}
 	}
 
-	for _, name := range sortedKeys(profile.Deps) {
+	for _, name := range util.SortedKeys(profile.Deps) {
 		dep := profile.Deps[name]
 		image := depImages[dep.Kind]
 		if image == "" {
@@ -229,14 +229,8 @@ func envVars(env map[string]string) []EnvVar {
 		return nil
 	}
 
-	keys := make([]string, 0, len(env))
-	for key := range env {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-
 	vars := make([]EnvVar, 0, len(env))
-	for _, key := range keys {
+	for _, key := range util.SortedKeys(env) {
 		vars = append(vars, EnvVar{Name: key, Value: env[key]})
 	}
 	return vars
@@ -308,13 +302,4 @@ func sanitizeName(value string) string {
 		return "devx"
 	}
 	return result
-}
-
-func sortedKeys[T any](m map[string]T) []string {
-	keys := make([]string, 0, len(m))
-	for key := range m {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	return keys
 }

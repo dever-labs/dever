@@ -1,8 +1,8 @@
 package graph
 
 import (
+    "container/heap"
     "fmt"
-    "sort"
 
     "github.com/dever-labs/devx/internal/config"
 )
@@ -46,6 +46,21 @@ func Build(profile *config.Profile) (*Graph, error) {
     return &Graph{Nodes: nodes}, nil
 }
 
+// stringHeap is a min-heap of strings for deterministic topological ordering.
+type stringHeap []string
+
+func (h stringHeap) Len() int            { return len(h) }
+func (h stringHeap) Less(i, j int) bool { return h[i] < h[j] }
+func (h stringHeap) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
+func (h *stringHeap) Push(x any)        { *h = append(*h, x.(string)) }
+func (h *stringHeap) Pop() any {
+    old := *h
+    n := len(old)
+    x := old[n-1]
+    *h = old[:n-1]
+    return x
+}
+
 func TopoSort(g *Graph) ([]string, error) {
     if g == nil {
         return nil, nil
@@ -70,27 +85,25 @@ func TopoSort(g *Graph) ([]string, error) {
         }
     }
 
-    var queue []string
+    h := &stringHeap{}
+    heap.Init(h)
     for name, count := range indegree {
         if count == 0 {
-            queue = append(queue, name)
+            heap.Push(h, name)
         }
     }
-    sort.Strings(queue)
 
     var order []string
-    for len(queue) > 0 {
-        current := queue[0]
-        queue = queue[1:]
+    for h.Len() > 0 {
+        current := heap.Pop(h).(string)
         order = append(order, current)
 
         for _, next := range adj[current] {
             indegree[next]--
             if indegree[next] == 0 {
-                queue = append(queue, next)
+                heap.Push(h, next)
             }
         }
-        sort.Strings(queue)
     }
 
     if len(order) != len(g.Nodes) {

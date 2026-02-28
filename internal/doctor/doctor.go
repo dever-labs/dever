@@ -6,13 +6,15 @@ import (
     "net"
     "os"
     "os/exec"
-    "runtime"
+    goruntime "runtime"
     "sort"
     "strings"
 
     "github.com/dever-labs/devx/internal/config"
     "github.com/dever-labs/devx/internal/k8s"
     "github.com/dever-labs/devx/internal/runtime"
+    "github.com/dever-labs/devx/internal/runtime/docker"
+    "github.com/dever-labs/devx/internal/runtime/podman"
 )
 
 type Options struct {
@@ -45,10 +47,10 @@ func Run(ctx context.Context, opts Options) Report {
     checks = append(checks, Check{
         Name:   "CLI",
         Status: "PASS",
-        Detail: fmt.Sprintf("devx (dev) on %s/%s", runtime.GOOS, runtime.GOARCH),
+        Detail: fmt.Sprintf("devx (dev) on %s/%s", goruntime.GOOS, goruntime.GOARCH),
     })
 
-    runtimeChecks := runtime.DetectAll(ctx)
+    runtimeChecks := detectAllRuntimes(ctx)
     for _, info := range runtimeChecks {
         status := "FAIL"
         if info.Available {
@@ -90,6 +92,19 @@ func PrintReport(out *os.File, report Report) {
     for _, check := range report.Checks {
         fmt.Fprintf(out, "%s\t%s\t%s\n", check.Status, check.Name, check.Detail)
     }
+}
+
+func detectAllRuntimes(ctx context.Context) []runtime.RuntimeInfo {
+    var infos []runtime.RuntimeInfo
+    for _, rt := range []runtime.Runtime{docker.New(), podman.New()} {
+        ok, err := rt.Detect(ctx)
+        info := runtime.RuntimeInfo{Name: rt.Name(), Available: ok}
+        if err != nil {
+            info.Details = err.Error()
+        }
+        infos = append(infos, info)
+    }
+    return infos
 }
 
 func detectCompose(ctx context.Context, runtimeName string) Check {

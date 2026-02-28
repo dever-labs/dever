@@ -3,11 +3,11 @@ package compose
 import (
     "bytes"
     "fmt"
-    "sort"
     "strings"
 
     "github.com/dever-labs/devx/internal/config"
     "github.com/dever-labs/devx/internal/lock"
+    "github.com/dever-labs/devx/internal/util"
     "gopkg.in/yaml.v3"
 )
 
@@ -69,7 +69,7 @@ func Render(manifest *config.Manifest, profileName string, profile *config.Profi
         Volumes:  map[string]Volume{},
     }
 
-    for _, name := range sortedKeys(profile.Deps) {
+    for _, name := range util.SortedKeys(profile.Deps) {
         dep := profile.Deps[name]
         image := depImages[dep.Kind]
         if dep.Version != "" {
@@ -110,7 +110,7 @@ func Render(manifest *config.Manifest, profileName string, profile *config.Profi
         }
     }
 
-    for _, name := range sortedKeys(profile.Services) {
+    for _, name := range util.SortedKeys(profile.Services) {
         svc := profile.Services[name]
         service := Service{
             Image:       rewriteImage(svc.Image, rewrite),
@@ -230,13 +230,4 @@ func Normalize(data string) (string, error) {
         return "", err
     }
     return buf.String(), nil
-}
-
-func sortedKeys[T any](m map[string]T) []string {
-    keys := make([]string, 0, len(m))
-    for key := range m {
-        keys = append(keys, key)
-    }
-    sort.Strings(keys)
-    return keys
 }

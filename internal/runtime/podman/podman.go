@@ -6,6 +6,8 @@ import (
     "context"
     "encoding/json"
     "fmt"
+    "io"
+    "os"
     "os/exec"
     "strings"
 
@@ -52,7 +54,7 @@ func (r *Runtime) Down(ctx context.Context, composePath string, projectName stri
     return run(ctx, r.Binary, args...)
 }
 
-func (r *Runtime) Logs(ctx context.Context, composePath string, projectName string, opts runtime.LogsOptions) (runtime.ReadCloser, error) {
+func (r *Runtime) Logs(ctx context.Context, composePath string, projectName string, opts runtime.LogsOptions) (io.ReadCloser, error) {
     args := []string{"compose", "-f", composePath, "-p", projectName, "logs", "--timestamps"}
     if opts.Follow {
         args = append(args, "--follow")
@@ -155,17 +157,17 @@ func resolveRepoDigest(ctx context.Context, binary string, image string) (string
 
 func run(ctx context.Context, binary string, args ...string) error {
     cmd := exec.CommandContext(ctx, binary, args...)
-    cmd.Stdout = nil
-    cmd.Stderr = nil
+    cmd.Stdout = os.Stdout
+    cmd.Stderr = os.Stderr
     return cmd.Run()
 }
 
 type commandReader struct {
     cmd *exec.Cmd
-    rc  runtime.ReadCloser
+    rc  io.ReadCloser
 }
 
-func newCommandReader(cmd *exec.Cmd, rc runtime.ReadCloser) runtime.ReadCloser {
+func newCommandReader(cmd *exec.Cmd, rc io.ReadCloser) io.ReadCloser {
     return &commandReader{cmd: cmd, rc: rc}
 }
 
