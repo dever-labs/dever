@@ -1,0 +1,95 @@
+version: 1
+
+project:
+  name: my-app
+  defaultProfile: local
+
+registry:
+  prefix: ""  # e.g. myregistry.azurecr.io
+
+profiles:
+  local:
+    services:
+      api:
+        image: nginx:alpine
+        ports:
+          - "8080:80"
+        env:
+          ASPNETCORE_ENVIRONMENT: Development
+          DB_HOST: db
+          DB_PORT: "5432"
+          DB_NAME: appdb
+          DB_USER: postgres
+          DB_PASSWORD: postgres
+          REDIS_URL: redis://cache:6379
+        dependsOn:
+          - db
+          - cache
+
+    deps:
+      db:
+        kind: postgres
+        version: "16"
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: appdb
+        ports:
+          - "5432:5432"
+        volume: "db-data:/var/lib/postgresql/data"
+
+      cache:
+        kind: redis
+        version: "7"
+        ports:
+          - "6379:6379"
+
+  ci:
+    services:
+      api:
+        image: nginx:alpine
+        env:
+          ASPNETCORE_ENVIRONMENT: Test
+          DB_HOST: db
+          DB_PORT: "5432"
+          DB_NAME: appdb
+          DB_USER: postgres
+          DB_PASSWORD: postgres
+        dependsOn:
+          - db
+
+    deps:
+      db:
+        kind: postgres
+        version: "16"
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: appdb
+        ports:
+          - "5432:5432"
+
+  k8s:
+    runtime: k8s
+    services:
+      api:
+        image: myregistry.azurecr.io/my-app/api:latest
+        ports:
+          - "80:8080"
+        env:
+          ASPNETCORE_ENVIRONMENT: Production
+          DB_HOST: db
+          DB_PORT: "5432"
+          DB_NAME: appdb
+          DB_USER: postgres
+          DB_PASSWORD: postgres
+        dependsOn:
+          - db
+
+    deps:
+      db:
+        kind: postgres
+        version: "16"
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: appdb
+        ports:
+          - "5432:5432"

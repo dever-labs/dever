@@ -92,6 +92,27 @@ func (r *Runtime) Exec(ctx context.Context, composePath string, projectName stri
     return 0, nil
 }
 
+func parseStatusEntries(out []byte) ([]map[string]any, error) {
+    // Docker Compose v2 outputs NDJSON (one object per line), not a JSON array.
+    // Fall back to array parsing for older versions.
+    var entries []map[string]any
+    if err := json.Unmarshal(out, &entries); err == nil {
+        return entries, nil
+    }
+    for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+        line = strings.TrimSpace(line)
+        if line == "" {
+            continue
+        }
+        var entry map[string]any
+        if err := json.Unmarshal([]byte(line), &entry); err != nil {
+            return nil, err
+        }
+        entries = append(entries, entry)
+    }
+    return entries, nil
+}
+
 func (r *Runtime) Status(ctx context.Context, composePath string, projectName string) ([]runtime.ServiceStatus, error) {
     args := []string{"compose", "-f", composePath, "-p", projectName, "ps", "--format", "json"}
     cmd := exec.CommandContext(ctx, r.Binary, args...)
@@ -100,8 +121,8 @@ func (r *Runtime) Status(ctx context.Context, composePath string, projectName st
         return nil, err
     }
 
-    var entries []map[string]any
-    if err := json.Unmarshal(out, &entries); err != nil {
+    entries, err := parseStatusEntries(out)
+    if err != nil {
         return nil, err
     }
 
@@ -111,11 +132,20 @@ func (r *Runtime) Status(ctx context.Context, composePath string, projectName st
         state, _ := entry["State"].(string)
         health, _ := entry["Health"].(string)
         ports := fmt.Sprintf("%v", entry["Publishers"])
+
+        var publishers []runtime.Publisher
+        if raw, ok := entry["Publishers"]; ok {
+            if data, err := json.Marshal(raw); err == nil {
+                _ = json.Unmarshal(data, &publishers)
+            }
+        }
+
         results = append(results, runtime.ServiceStatus{
-            Name:   name,
-            State:  state,
-            Health: health,
-            Ports:  ports,
+            Name:       name,
+            State:      state,
+            Health:     health,
+            Ports:      ports,
+            Publishers: publishers,
         })
     }
 

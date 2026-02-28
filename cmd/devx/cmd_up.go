@@ -61,6 +61,7 @@ func runUp(ctx context.Context, args []string) error {
 	}
 
 	fmt.Println("Environment is up")
+	printLinks(ctx, rt, composePath, manifest.Project.Name)
 	return nil
 }
 

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -273,4 +274,81 @@ func selectRuntime(ctx context.Context) (runtime.Runtime, error) {
 		return p, nil
 	}
 	return nil, runtime.ErrNoRuntime
+}
+
+// printLinks queries the running stack for actual host-port bindings and prints
+// http://localhost:<port> for every published port. Using the runtime (not the
+// compose YAML) ensures randomly-assigned ports are reflected correctly.
+func printLinks(ctx context.Context, rt runtime.Runtime, composePath, projectName string) {
+	statuses, err := rt.Status(ctx, composePath, projectName)
+	if err != nil {
+		return
+	}
+
+	type link struct {
+		label string
+		url   string
+	}
+	var links []link
+	seen := map[string]bool{}
+
+	for _, svc := range statuses {
+		label := serviceLabel(svc.Name)
+		for _, pub := range svc.Publishers {
+			if pub.PublishedPort == 0 {
+				continue
+			}
+			url := fmt.Sprintf("http://localhost:%d", pub.PublishedPort)
+			key := label + url
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			links = append(links, link{label: label, url: url})
+		}
+	}
+
+	if len(links) == 0 {
+		return
+	}
+
+	sort.Slice(links, func(i, j int) bool { return links[i].label < links[j].label })
+
+	fmt.Println("\nAvailable services:")
+	maxLen := 0
+	for _, l := range links {
+		if len(l.label) > maxLen {
+			maxLen = len(l.label)
+		}
+	}
+	for _, l := range links {
+		fmt.Printf("  %-*s  %s\n", maxLen, l.label, l.url)
+	}
+}
+
+// wellKnownLabels maps telemetry service name suffixes to display labels.
+var wellKnownLabels = map[string]string{
+	"grafana":     "Grafana",
+	"prometheus":  "Prometheus",
+	"loki":        "Loki",
+	"cadvisor":    "cAdvisor",
+	"alloy":       "Alloy",
+	"docker-meta": "Docker Meta",
+}
+
+func serviceLabel(name string) string {
+	lower := strings.ToLower(name)
+	// Strip common telemetry prefix
+	stripped := strings.TrimPrefix(lower, "devx-telemetry-")
+	if label, ok := wellKnownLabels[stripped]; ok {
+		return label
+	}
+	// Title-case the service name for user services
+	parts := strings.FieldsFunc(name, func(r rune) bool { return r == '-' || r == '_' })
+	for i, p := range parts {
+		if len(p) > 0 {
+			parts[i] = strings.ToUpper(p[:1]) + p[1:]
+		}
+	}
+	return strings.Join(parts, " ")
 }

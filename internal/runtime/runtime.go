@@ -19,10 +19,19 @@ type LogsOptions struct {
 }
 
 type ServiceStatus struct {
-    Name   string
-    State  string
-    Health string
-    Ports  string
+	Name       string
+	State      string
+	Health     string
+	Ports      string
+	Publishers []Publisher
+}
+
+// Publisher represents an actual host-port binding as reported by the container runtime.
+type Publisher struct {
+	URL           string
+	TargetPort    int
+	PublishedPort int
+	Protocol      string
 }
 
 type Runtime interface {

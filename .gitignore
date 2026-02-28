@@ -1,0 +1,6 @@
+# Build output
+devx
+devx.exe
+
+# Runtime directory — generated compose, telemetry configs, state, secrets
+.devx/

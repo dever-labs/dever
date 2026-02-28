@@ -102,7 +102,18 @@ func (r *Runtime) Status(ctx context.Context, composePath string, projectName st
 
     var entries []map[string]any
     if err := json.Unmarshal(out, &entries); err != nil {
-        return nil, err
+        // Docker Compose v2 outputs NDJSON (one object per line)
+        for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+            line = strings.TrimSpace(line)
+            if line == "" {
+                continue
+            }
+            var entry map[string]any
+            if err := json.Unmarshal([]byte(line), &entry); err != nil {
+                return nil, err
+            }
+            entries = append(entries, entry)
+        }
     }
 
     var results []runtime.ServiceStatus
@@ -111,11 +122,20 @@ func (r *Runtime) Status(ctx context.Context, composePath string, projectName st
         state, _ := entry["State"].(string)
         health, _ := entry["Health"].(string)
         ports := fmt.Sprintf("%v", entry["Publishers"])
+
+        var publishers []runtime.Publisher
+        if raw, ok := entry["Publishers"]; ok {
+            if data, err := json.Marshal(raw); err == nil {
+                _ = json.Unmarshal(data, &publishers)
+            }
+        }
+
         results = append(results, runtime.ServiceStatus{
-            Name:   name,
-            State:  state,
-            Health: health,
-            Ports:  ports,
+            Name:       name,
+            State:      state,
+            Health:     health,
+            Ports:      ports,
+            Publishers: publishers,
         })
     }
 

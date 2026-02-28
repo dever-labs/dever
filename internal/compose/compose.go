@@ -12,7 +12,6 @@ import (
 )
 
 type File struct {
-    Version  string             `yaml:"version"`
     Services map[string]Service `yaml:"services"`
     Networks map[string]Network `yaml:"networks,omitempty"`
     Volumes  map[string]Volume  `yaml:"volumes,omitempty"`
@@ -34,6 +33,7 @@ type Service struct {
     Labels      map[string]string `yaml:"labels,omitempty"`
     Healthcheck *Healthcheck      `yaml:"healthcheck,omitempty"`
     Networks    []string          `yaml:"networks,omitempty"`
+    Privileged  bool              `yaml:"privileged,omitempty"`
 }
 
 type Build struct {
@@ -63,7 +63,6 @@ func Render(manifest *config.Manifest, profileName string, profile *config.Profi
     }
 
     file := File{
-        Version:  "3.9",
         Services: map[string]Service{},
         Networks: map[string]Network{"devx_default": {}},
         Volumes:  map[string]Volume{},
