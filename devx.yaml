@@ -5,23 +5,39 @@ project:
   defaultProfile: local
 
 registry:
-  prefix: ""  # e.g. myregistry.azurecr.io
+  prefix: ""  # e.g. myregistry.azurecr.io/my-app
 
 profiles:
+
+  # ── local ─────────────────────────────────────────────────────────────────
+  # Docker Compose, built from source. Run with: devx up
   local:
+    runtime: compose  # default — can be omitted
     services:
       api:
         image: nginx:alpine
         ports:
           - "8080:80"
         env:
-          ASPNETCORE_ENVIRONMENT: Development
+          APP_ENV: development
           DB_HOST: db
           DB_PORT: "5432"
           DB_NAME: appdb
           DB_USER: postgres
           DB_PASSWORD: postgres
           REDIS_URL: redis://cache:6379
+        dependsOn:
+          - db
+          - cache
+
+      worker:
+        image: alpine:3.19
+        command: ["sh", "-c", "while true; do echo 'worker running'; sleep 30; done"]
+        env:
+          APP_ENV: development
+          DB_HOST: db
+          DB_PORT: "5432"
+          DB_PASSWORD: postgres
         dependsOn:
           - db
           - cache
@@ -43,12 +59,19 @@ profiles:
         ports:
           - "6379:6379"
 
+    hooks:
+      afterUp:
+        - run: "echo 'Dev environment ready'"
+
+  # ── ci ────────────────────────────────────────────────────────────────────
+  # Docker Compose, pre-built images. Run with: devx up --profile ci
   ci:
+    runtime: compose
     services:
       api:
-        image: nginx:alpine
+        image: myregistry.azurecr.io/my-app/api:latest
         env:
-          ASPNETCORE_ENVIRONMENT: Test
+          APP_ENV: test
           DB_HOST: db
           DB_PORT: "5432"
           DB_NAME: appdb
@@ -67,6 +90,54 @@ profiles:
         ports:
           - "5432:5432"
 
+    hooks:
+      afterUp:
+        - exec: "migrate up"
+          service: api
+
+  # ── staging ───────────────────────────────────────────────────────────────
+  # Docker Compose on a remote VM / staging server with a real registry image.
+  # Run with: devx up --profile staging
+  staging:
+    runtime: compose
+    services:
+      api:
+        image: myregistry.azurecr.io/my-app/api:stable
+        ports:
+          - "80:8080"
+        env:
+          APP_ENV: staging
+          DB_HOST: db
+          DB_PORT: "5432"
+          DB_NAME: appdb
+          DB_USER: postgres
+          DB_PASSWORD: "${DB_PASSWORD}"   # read from host environment
+        dependsOn:
+          - db
+        health:
+          httpGet: http://localhost/health
+          interval: 10s
+          retries: 6
+
+    deps:
+      db:
+        kind: postgres
+        version: "16"
+        env:
+          POSTGRES_PASSWORD: "${DB_PASSWORD}"
+          POSTGRES_DB: appdb
+        ports:
+          - "5432:5432"
+        volume: "staging-db-data:/var/lib/postgresql/data"
+
+    hooks:
+      afterUp:
+        - exec: "migrate up"
+          service: api
+
+  # ── k8s ───────────────────────────────────────────────────────────────────
+  # Kubernetes via kubectl. Run with: devx up --profile k8s
+  # Images must already exist in the registry — devx does not build for k8s.
   k8s:
     runtime: k8s
     services:
@@ -75,11 +146,21 @@ profiles:
         ports:
           - "80:8080"
         env:
-          ASPNETCORE_ENVIRONMENT: Production
+          APP_ENV: production
           DB_HOST: db
           DB_PORT: "5432"
           DB_NAME: appdb
           DB_USER: postgres
+          DB_PASSWORD: postgres
+        dependsOn:
+          - db
+
+      worker:
+        image: myregistry.azurecr.io/my-app/worker:latest
+        env:
+          APP_ENV: production
+          DB_HOST: db
+          DB_PORT: "5432"
           DB_PASSWORD: postgres
         dependsOn:
           - db

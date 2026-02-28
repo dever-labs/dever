@@ -89,6 +89,24 @@ func ValidateProfile(m *Manifest, profile string) error {
         }
     }
 
+    allHooks := append(prof.Hooks.AfterUp, prof.Hooks.BeforeDown...)
+    for i, h := range allHooks {
+        hasExec := h.Exec != ""
+        hasRun := h.Run != ""
+        if !hasExec && !hasRun {
+            issues = append(issues, fmt.Sprintf("hook[%d] must set either exec or run", i))
+        }
+        if hasExec && hasRun {
+            issues = append(issues, fmt.Sprintf("hook[%d] cannot set both exec and run", i))
+        }
+        if hasExec && h.Service == "" {
+            issues = append(issues, fmt.Sprintf("hook[%d] exec requires service to be set", i))
+        }
+        if hasRun && h.Service != "" {
+            issues = append(issues, fmt.Sprintf("hook[%d] run does not use service", i))
+        }
+    }
+
     if len(issues) > 0 {
         return &ValidationError{Issues: issues}
     }

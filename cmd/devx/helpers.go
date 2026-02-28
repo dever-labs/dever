@@ -8,7 +8,9 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -17,7 +19,7 @@ import (
 	"github.com/dever-labs/devx/internal/config"
 	"github.com/dever-labs/devx/internal/graph"
 	"github.com/dever-labs/devx/internal/lock"
-	"github.com/dever-labs/devx/internal/runtime"
+	devxruntime "github.com/dever-labs/devx/internal/runtime"
 	"github.com/dever-labs/devx/internal/runtime/docker"
 	"github.com/dever-labs/devx/internal/runtime/podman"
 )
@@ -264,7 +266,7 @@ func collectImages(manifest *config.Manifest, profileName string, prof *config.P
 	return imgs, nil
 }
 
-func selectRuntime(ctx context.Context) (runtime.Runtime, error) {
+func selectRuntime(ctx context.Context) (devxruntime.Runtime, error) {
 	d := docker.New()
 	if ok, _ := d.Detect(ctx); ok {
 		return d, nil
@@ -273,13 +275,13 @@ func selectRuntime(ctx context.Context) (runtime.Runtime, error) {
 	if ok, _ := p.Detect(ctx); ok {
 		return p, nil
 	}
-	return nil, runtime.ErrNoRuntime
+	return nil, devxruntime.ErrNoRuntime
 }
 
 // printLinks queries the running stack for actual host-port bindings and prints
 // http://localhost:<port> for every published port. Using the runtime (not the
 // compose YAML) ensures randomly-assigned ports are reflected correctly.
-func printLinks(ctx context.Context, rt runtime.Runtime, composePath, projectName string) {
+func printLinks(ctx context.Context, rt devxruntime.Runtime, composePath, projectName string) {
 	statuses, err := rt.Status(ctx, composePath, projectName)
 	if err != nil {
 		return
@@ -351,4 +353,41 @@ func serviceLabel(name string) string {
 		}
 	}
 	return strings.Join(parts, " ")
+}
+
+// runHooks executes a slice of lifecycle hooks sequentially, stopping on first error.
+// exec hooks run a command inside a running container; run hooks run a host shell command.
+func runHooks(ctx context.Context, rt devxruntime.Runtime, composePath, projectName string, hooks []config.Hook) error {
+	for i, h := range hooks {
+		if h.Exec != "" {
+			fmt.Printf("  [hook %d] exec in %s: %s\n", i+1, h.Service, h.Exec)
+			cmd := strings.Fields(h.Exec)
+			code, err := rt.Exec(ctx, composePath, projectName, h.Service, cmd)
+			if err != nil {
+				return fmt.Errorf("hook %d exec failed: %w", i+1, err)
+			}
+			if code != 0 {
+				return fmt.Errorf("hook %d exec exited with code %d", i+1, code)
+			}
+		} else {
+			fmt.Printf("  [hook %d] run: %s\n", i+1, h.Run)
+			if err := runShellCommand(h.Run); err != nil {
+				return fmt.Errorf("hook %d run failed: %w", i+1, err)
+			}
+		}
+	}
+	return nil
+}
+
+// runShellCommand runs a command string via the system shell with stdout/stderr inherited.
+func runShellCommand(command string) error {
+	var cmd *exec.Cmd
+	if runtime.GOOS == "windows" {
+		cmd = exec.Command("cmd", "/c", command)
+	} else {
+		cmd = exec.Command("sh", "-c", command)
+	}
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
 }

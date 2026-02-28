@@ -27,6 +27,26 @@ type Profile struct {
     Services map[string]Service `yaml:"services"`
     Deps     map[string]Dep     `yaml:"deps"`
     Runtime  string             `yaml:"runtime"`
+    Hooks    Hooks              `yaml:"hooks"`
+}
+
+// Hooks defines commands to run at lifecycle points around devx up/down.
+type Hooks struct {
+    AfterUp    []Hook `yaml:"afterUp"`
+    BeforeDown []Hook `yaml:"beforeDown"`
+}
+
+// Hook is a single lifecycle step. Exactly one of Exec or Run must be set.
+//
+//   exec: runs a command inside an already-running container via `docker compose exec`.
+//         Service is required.
+//   run:  runs a command on the host via the system shell.
+type Hook struct {
+    // Exec is the command to run inside Service (e.g. "migrate up").
+    Exec    string `yaml:"exec"`
+    Service string `yaml:"service"`
+    // Run is a host-side shell command (e.g. "./scripts/seed.sh").
+    Run string `yaml:"run"`
 }
 
 type Service struct {

@@ -200,6 +200,74 @@ When `runtime: k8s` is set, `devx render k8s` and `devx up/down` use `kubectl` i
 
 ---
 
+## Hooks
+
+Hooks let you run commands at lifecycle points around `devx up` and `devx down`. Each hook is either an `exec` (runs inside a container) or a `run` (runs on the host). Hooks execute sequentially and stop on the first failure.
+
+```yaml
+profiles:
+  local:
+    hooks:
+      afterUp:
+        - exec: "migrate up"
+          service: api
+        - run: "./scripts/seed.sh"
+      beforeDown:
+        - exec: "migrate down"
+          service: api
+    services:
+      api:
+        image: myimage:tag
+```
+
+### Hook fields
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `exec` | string | one of exec/run | Command run inside `service` via `docker compose exec`. |
+| `service` | string | when exec | The service name to exec into. |
+| `run` | string | one of exec/run | Host shell command — runs via `sh -c` (Linux/macOS) or `cmd /c` (Windows). |
+
+### Hook lifecycle points
+
+| Key | When it runs |
+|---|---|
+| `afterUp` | After all containers are up and health checks pass |
+| `beforeDown` | Before containers are stopped |
+
+### Common patterns
+
+**Database migrations** (exec into app container):
+```yaml
+hooks:
+  afterUp:
+    - exec: "migrate up"
+      service: api
+  beforeDown:
+    - exec: "migrate down"
+      service: api
+```
+
+**Seed data from a host script**:
+```yaml
+hooks:
+  afterUp:
+    - run: "./scripts/seed.sh"
+```
+
+**Multiple steps** (run in order, stop on first failure):
+```yaml
+hooks:
+  afterUp:
+    - exec: "migrate up"
+      service: api
+    - exec: "python manage.py loaddata fixtures/dev.json"
+      service: api
+    - run: "./scripts/notify-slack.sh"
+```
+
+---
+
 ## Full example
 
 ```yaml
@@ -233,6 +301,15 @@ profiles:
           - cache
         health:
           httpGet: http://localhost:8080/health
+
+    hooks:
+      afterUp:
+        - exec: "migrate up"
+          service: api
+        - run: "./scripts/seed.sh"
+      beforeDown:
+        - exec: "migrate down"
+          service: api
 
     deps:
       db:

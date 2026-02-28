@@ -56,6 +56,13 @@ func runUp(ctx context.Context, args []string) error {
 		return err
 	}
 
+	if len(prof.Hooks.AfterUp) > 0 {
+		fmt.Println("Running afterUp hooks...")
+		if err := runHooks(ctx, rt, composePath, manifest.Project.Name, prof.Hooks.AfterUp); err != nil {
+			return err
+		}
+	}
+
 	if err := writeState(state{Profile: profName, Runtime: rt.Name(), Telemetry: enableTelemetry}); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: failed to write state: %v\n", err)
 	}

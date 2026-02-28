@@ -40,6 +40,13 @@ func runDown(ctx context.Context, args []string) error {
 		}
 	}
 
+	if len(prof.Hooks.BeforeDown) > 0 {
+		fmt.Println("Running beforeDown hooks...")
+		if err := runHooks(ctx, rt, composePath, manifest.Project.Name, prof.Hooks.BeforeDown); err != nil {
+			return err
+		}
+	}
+
 	return rt.Down(ctx, composePath, manifest.Project.Name, *volumes)
 }
 
