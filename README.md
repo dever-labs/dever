@@ -1,5 +1,9 @@
 # devx
 
+[![CI](https://github.com/dever-labs/dever/actions/workflows/ci.yml/badge.svg)](https://github.com/dever-labs/dever/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Go Report Card](https://goreportcard.com/badge/github.com/dever-labs/devx)](https://goreportcard.com/report/github.com/dever-labs/devx)
+
 **devx** is a single-binary, cross-platform dev orchestrator for any repo. Define your services and dependencies once in `devx.yaml`, then spin up identical environments with one command — locally, in CI, or on Kubernetes.
 
 ```sh
@@ -8,8 +12,6 @@ devx status      # see running services + browser links
 devx logs api    # tail logs
 devx down        # tear down
 ```
-
----
 
 ## Installation
 
@@ -43,8 +45,6 @@ winget install dever-labs.devx
 Pre-built binaries for all platforms are also available on the [Releases](https://github.com/dever-labs/dever/releases) page — download, make executable, and place on your `PATH`.
 See [docs/install.md](docs/install.md) for all methods including step-by-step manual setup.
 
----
-
 ## Quickstart
 
 ```sh
@@ -62,8 +62,6 @@ Available services:
   Api      http://localhost:8080
   Grafana  http://localhost:54231
 ```
-
----
 
 ## Commands
 
@@ -108,13 +106,9 @@ Available services:
 **`devx doctor`**
 - `--fix` — attempt to auto-fix detected issues
 
----
-
 ## devx.yaml reference
 
 See [docs/manifest.md](docs/manifest.md) for the full schema and all supported fields.
-
----
 
 ## Built-in telemetry stack
 
@@ -140,8 +134,6 @@ See [docs/telemetry.md](docs/telemetry.md) for details.
 
 Disable with `devx up --no-telemetry`.
 
----
-
 ## Profiles
 
 Profiles let you define different environments in the same file:
@@ -156,8 +148,6 @@ profiles:
 
 The `defaultProfile` in `project` is used when `--profile` is omitted.
 
----
-
 ## Kubernetes
 
 Render a profile to Kubernetes manifests:
@@ -170,15 +160,11 @@ devx down --profile k8s                 # kubectl delete
 
 See [docs/manifest.md#kubernetes](docs/manifest.md#kubernetes) for constraints.
 
----
-
 ## Offline / airgapped
 
 1. Set `registry.prefix` in devx.yaml (e.g. `myregistry.azurecr.io`).
 2. Run `devx lock update` while you have registry access — this writes `devx.lock` with image digests.
 3. Commit `devx.lock`. On airgapped machines `devx up` uses digest-pinned images automatically.
-
----
 
 ## Generated files
 
@@ -189,3 +175,12 @@ All runtime artifacts are written to `.devx/` (gitignored):
 | `.devx/compose.yaml` | Generated Docker Compose file |
 | `.devx/state.json` | Active profile, runtime, and telemetry state |
 | `.devx/telemetry/` | Grafana dashboards, Prometheus config, Alloy config |
+
+## Contributing
+
+Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on development setup, testing, and submitting pull requests.
+
+## License
+
+[MIT](LICENSE) © dever-labs
+
