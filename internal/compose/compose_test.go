@@ -25,8 +25,7 @@ func TestRenderCompose(t *testing.T) {
 		},
 		Deps: map[string]config.Dep{
 			"db": {
-				Kind:    "postgres",
-				Version: "16",
+				Image: "postgres:16",
 				Env: map[string]string{
 					"POSTGRES_PASSWORD": "postgres",
 				},

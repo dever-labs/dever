@@ -6,11 +6,6 @@ import (
 	"strings"
 )
 
-var supportedDeps = map[string]bool{
-	"postgres": true,
-	"redis":    true,
-}
-
 type ValidationError struct {
 	Issues []string
 }
@@ -40,6 +35,14 @@ func Validate(m *Manifest) error {
 	}
 	if len(m.Profiles) == 0 {
 		issues = append(issues, "profiles are required")
+	}
+	if m.AI != nil {
+		if m.AI.Provider == "" {
+			issues = append(issues, "ai.provider is required when ai block is present")
+		}
+		if m.AI.Model == "" {
+			issues = append(issues, "ai.model is required when ai block is present")
+		}
 	}
 	if len(issues) > 0 {
 		return &ValidationError{Issues: issues}
@@ -72,10 +75,21 @@ func ValidateProfile(m *Manifest, profile string) error {
 	}
 
 	for name, dep := range prof.Deps {
-		if dep.Kind == "" {
-			issues = append(issues, fmt.Sprintf("dep '%s' must define kind", name))
-		} else if !supportedDeps[dep.Kind] {
-			issues = append(issues, fmt.Sprintf("dep '%s' kind '%s' is not supported", name, dep.Kind))
+		if dep.Kind == "" && dep.Image == "" {
+			issues = append(issues, fmt.Sprintf("dep '%s' must define image (or set kind to use a provider's default image)", name))
+		}
+		if dep.Kind != "" && dep.Version == "" {
+			issues = append(issues, fmt.Sprintf("dep '%s' has kind '%s' but is missing version — version is required when kind is set", name, dep.Kind))
+		}
+		if dep.Source != "" && !strings.Contains(dep.Source, "/") {
+			issues = append(issues, fmt.Sprintf("dep '%s' source must be in org/name format (e.g. devx-labs/postgres)", name))
+		}
+		for i, c := range dep.Connect {
+			if c.Service == "" {
+				issues = append(issues, fmt.Sprintf("dep '%s' connect[%d] must specify a service", name, i))
+			} else if _, ok := prof.Services[c.Service]; !ok {
+				issues = append(issues, fmt.Sprintf("dep '%s' connect[%d] references service '%s' which does not exist", name, i, c.Service))
+			}
 		}
 	}
 

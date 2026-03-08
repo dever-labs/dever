@@ -94,11 +94,6 @@ type ServicePort struct {
 	TargetPort int    `yaml:"targetPort"`
 }
 
-var depImages = map[string]string{
-	"postgres": "postgres",
-	"redis":    "redis",
-}
-
 func Render(manifest *config.Manifest, profileName string, profile *config.Profile, namespace string) (string, error) {
 	if manifest == nil || profile == nil {
 		return "", fmt.Errorf("manifest and profile are required")
@@ -160,13 +155,10 @@ func Render(manifest *config.Manifest, profileName string, profile *config.Profi
 
 	for _, name := range util.SortedKeys(profile.Deps) {
 		dep := profile.Deps[name]
-		image := depImages[dep.Kind]
-		if image == "" {
-			return "", fmt.Errorf("dep '%s' kind '%s' is not supported for k8s render", name, dep.Kind)
+		if dep.Image == "" {
+			return "", fmt.Errorf("dep '%s' must define image for k8s render", name)
 		}
-		if dep.Version != "" {
-			image = image + ":" + dep.Version
-		}
+		image := dep.Image
 
 		labels := map[string]string{"app": project + "-" + sanitizeName(name)}
 		container := Container{

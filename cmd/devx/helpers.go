@@ -15,10 +15,12 @@ import (
 	"strings"
 	"time"
 
+	devxai "github.com/dever-labs/devx/internal/ai"
 	"github.com/dever-labs/devx/internal/compose"
 	"github.com/dever-labs/devx/internal/config"
 	"github.com/dever-labs/devx/internal/graph"
 	"github.com/dever-labs/devx/internal/lock"
+	"github.com/dever-labs/devx/internal/providers"
 	devxruntime "github.com/dever-labs/devx/internal/runtime"
 	"github.com/dever-labs/devx/internal/runtime/docker"
 	"github.com/dever-labs/devx/internal/runtime/podman"
@@ -83,6 +85,9 @@ func writeCompose(path string, manifest *config.Manifest, profName string, prof 
 }
 
 func buildCompose(manifest *config.Manifest, profName string, prof *config.Profile, lockfile *lock.Lockfile, enableTelemetry bool) (string, error) {
+	prof = resolveDepImages(prof)
+	prof = resolveConnections(manifest, prof)
+
 	g, err := graph.Build(prof)
 	if err != nil {
 		return "", err
@@ -91,9 +96,12 @@ func buildCompose(manifest *config.Manifest, profName string, prof *config.Profi
 		return "", err
 	}
 
+	depFragments := buildDepFragments(prof)
+
 	rewrite := compose.RewriteOptions{
 		RegistryPrefix: manifest.Registry.Prefix,
 		Lockfile:       lockfile,
+		DepFragments:   depFragments,
 	}
 
 	return compose.Render(manifest, profName, prof, rewrite, enableTelemetry)
@@ -390,4 +398,241 @@ func runShellCommand(command string) error {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
+}
+
+// loadLockfile loads devx.lock if it exists, returning nil without error when absent.
+func loadLockfile() (*lock.Lockfile, error) {
+	lf, err := lock.Load(lockFile)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	return lf, err
+}
+
+// ensureProviders fetches any provider binaries declared inline in the profile
+// deps that are not yet cached locally. Prints a warning for each provider that
+// cannot be fetched but does not return an error.
+func ensureProviders(manifest *config.Manifest, prof *config.Profile) {
+	lf, _ := loadLockfile()
+	seen := map[string]bool{}
+
+	for _, dep := range prof.Deps {
+		if dep.Kind == "" || dep.Version == "" {
+			continue
+		}
+		src := depProviderSource(dep)
+		key := src + "@" + dep.Version
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+
+		cached, _ := providers.IsCached(src, dep.Version)
+		if cached {
+			continue
+		}
+		fmt.Printf("Fetching provider %q (%s@%s)...\n", dep.Kind, src, dep.Version)
+		resolvedVersion, digest, err := providers.Fetch(src, dep.Version)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not fetch provider %q: %v\n", dep.Kind, err)
+			continue
+		}
+		if lf != nil {
+			if pin, ok := lf.Providers[src]; ok && pin.SHA256 != "" {
+				if verifyErr := providers.VerifyDigest(src, resolvedVersion, pin.SHA256); verifyErr != nil {
+					fmt.Fprintf(os.Stderr, "warning: %v\n", verifyErr)
+				}
+			}
+		}
+		fmt.Printf("  ✓ %s@%s (sha256:%s)\n", src, resolvedVersion, digest[:12])
+	}
+}
+
+// buildDepFragments invokes each dep's provider (if declared and cached) to
+// retrieve optional compose fragments such as healthcheck definitions.
+func buildDepFragments(prof *config.Profile) map[string]*compose.DepFragment {
+	fragments := map[string]*compose.DepFragment{}
+	for name, dep := range prof.Deps {
+		if dep.Kind == "" || dep.Version == "" {
+			continue
+		}
+		src := depProviderSource(dep)
+		input := providers.DepInput{
+			Name:   name,
+			Image:  dep.Image,
+			Ports:  dep.Ports,
+			Env:    dep.Env,
+			Volume: dep.Volume,
+		}
+		raw, err := providers.InvokeRenderCompose(src, dep.Version, input)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "warning: provider %q render-compose failed: %v\n", dep.Kind, err)
+			continue
+		}
+		if raw == nil || raw.Healthcheck == nil {
+			continue
+		}
+		fragments[name] = &compose.DepFragment{
+			Healthcheck: &compose.Healthcheck{
+				Test:     raw.Healthcheck.Test,
+				Interval: raw.Healthcheck.Interval,
+				Retries:  raw.Healthcheck.Retries,
+			},
+		}
+	}
+	return fragments
+}
+
+// resolveDepImages returns a shallow copy of prof with missing dep images
+// filled in from the provider's defaultImage (via describe).
+func resolveDepImages(prof *config.Profile) *config.Profile {
+	resolvedDeps := make(map[string]config.Dep, len(prof.Deps))
+	for name, dep := range prof.Deps {
+		resolvedDeps[name] = dep
+	}
+
+	for name, dep := range resolvedDeps {
+		if dep.Image != "" || dep.Kind == "" || dep.Version == "" {
+			continue
+		}
+		src := depProviderSource(dep)
+		meta, err := providers.Describe(src, dep.Version)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "warning: provider %q describe failed: %v\n", dep.Kind, err)
+			continue
+		}
+		if meta == nil {
+			fmt.Fprintf(os.Stderr, "warning: provider %q is not installed — run 'devx providers install'\n", dep.Kind)
+			continue
+		}
+		if meta.DefaultImage == "" {
+			fmt.Fprintf(os.Stderr, "warning: provider %q did not return a defaultImage\n", dep.Kind)
+			continue
+		}
+		dep.Image = meta.DefaultImage
+		resolvedDeps[name] = dep
+	}
+
+	resolved := *prof
+	resolved.Deps = resolvedDeps
+	return &resolved
+}
+
+// resolveConnections returns a shallow copy of prof with dep connect entries
+// applied — injecting the appropriate env vars into the target service containers.
+//
+// For each dep.connect entry:
+//   - If Env is set, template variables (${host}, ${port}, ${<DEP_ENV_KEY>}) are
+//     substituted with actual values and the result is merged into the service env.
+//   - If Env is omitted and AI is configured, the LLM scans the service build context
+//     to detect the correct env var names automatically.
+//   - If neither applies, a warning is printed and the entry is skipped.
+//
+// Service env vars that are already explicitly set are NOT overridden.
+func resolveConnections(manifest *config.Manifest, prof *config.Profile) *config.Profile {
+	hasConnect := false
+	for _, dep := range prof.Deps {
+		if len(dep.Connect) > 0 {
+			hasConnect = true
+			break
+		}
+	}
+	if !hasConnect {
+		return prof
+	}
+
+	// Shallow-copy services map so we can safely mutate env maps.
+	services := make(map[string]config.Service, len(prof.Services))
+	for name, svc := range prof.Services {
+		// Deep-copy the env map for this service.
+		env := make(map[string]string, len(svc.Env))
+		for k, v := range svc.Env {
+			env[k] = v
+		}
+		svc.Env = env
+		services[name] = svc
+	}
+
+	var aiClient *devxai.Client
+	if manifest.AI != nil {
+		var err error
+		aiClient, err = devxai.New(manifest.AI.Provider, manifest.AI.Model, manifest.AI.BaseURL)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "warning: AI not available for connection detection: %v\n", err)
+		}
+	}
+
+	for depName, dep := range prof.Deps {
+		if len(dep.Connect) == 0 {
+			continue
+		}
+		outputVals := providers.ResolveOutputValues(depName, dep.Ports, dep.Env)
+
+		for _, entry := range dep.Connect {
+			svc, ok := services[entry.Service]
+			if !ok {
+				fmt.Fprintf(os.Stderr, "warning: dep %q connect: service %q not found\n", depName, entry.Service)
+				continue
+			}
+
+			var injected map[string]string
+			if len(entry.Env) > 0 {
+				injected = renderEnvTemplates(entry.Env, outputVals)
+			} else if aiClient != nil {
+				var serviceDir string
+				if svc.Build != nil {
+					serviceDir = svc.Build.Context
+				}
+				var err error
+				injected, err = devxai.Detect(context.Background(), aiClient, dep.Kind, outputVals, serviceDir)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "warning: AI detection for dep %q → service %q failed: %v\n", depName, entry.Service, err)
+					continue
+				}
+			} else {
+				fmt.Fprintf(os.Stderr, "warning: dep %q connect to %q has no env mapping and AI is not configured — add an 'ai' block to devx.yaml or provide manual env mapping\n", depName, entry.Service)
+				continue
+			}
+
+			// Inject — service's own explicit env vars always win.
+			for k, v := range injected {
+				if _, alreadySet := svc.Env[k]; !alreadySet {
+					svc.Env[k] = v
+				}
+			}
+			services[entry.Service] = svc
+		}
+	}
+
+	resolved := *prof
+	resolved.Services = services
+	return &resolved
+}
+
+// renderEnvTemplates substitutes ${key} placeholders in each value of the env
+// map using the provided outputVals lookup. Unknown keys are left as-is.
+func renderEnvTemplates(env map[string]string, outputVals map[string]string) map[string]string {
+	result := make(map[string]string, len(env))
+	for k, v := range env {
+		result[k] = expandTemplate(v, outputVals)
+	}
+	return result
+}
+
+// expandTemplate replaces ${key} occurrences in s with values from vars.
+func expandTemplate(s string, vars map[string]string) string {
+	for k, v := range vars {
+		s = strings.ReplaceAll(s, "${"+k+"}", v)
+	}
+	return s
+}
+
+// depProviderSource returns the effective provider source for a dep.
+// If dep.Source is set it is used as-is; otherwise it defaults to
+// "devx-labs/<kind>".
+func depProviderSource(dep config.Dep) string {
+	if dep.Source != "" {
+		return dep.Source
+	}
+	return "devx-labs/" + dep.Kind
 }

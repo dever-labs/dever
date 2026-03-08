@@ -7,6 +7,19 @@ project:
 registry:
   prefix: ""  # e.g. myregistry.azurecr.io/my-app
 
+# ai configures the LLM used for:
+#   1. Automatic connection string injection (dep connect without explicit env mapping)
+#   2. devx export — generating production deployment artifacts (Compose, k8s, Helm, Terraform)
+#
+# Credentials are read from environment variables — never stored here:
+#   openai:       OPENAI_API_KEY
+#   anthropic:    ANTHROPIC_API_KEY
+#   azure-openai: AZURE_OPENAI_KEY
+#   ollama:       no key required (ensure ollama is running locally)
+ai:
+  provider: openai
+  model: gpt-4o-mini
+
 profiles:
 
   # ── local ─────────────────────────────────────────────────────────────────
@@ -15,49 +28,58 @@ profiles:
     runtime: compose  # default — can be omitted
     services:
       api:
-        image: nginx:alpine
+        build:
+          context: ./src/Api
         ports:
           - "8080:80"
         env:
           APP_ENV: development
-          DB_HOST: db
-          DB_PORT: "5432"
-          DB_NAME: appdb
-          DB_USER: postgres
-          DB_PASSWORD: postgres
-          REDIS_URL: redis://cache:6379
         dependsOn:
           - db
           - cache
+        # Connection env vars (DB_HOST, ConnectionStrings__Default, REDIS_URL etc.)
+        # are automatically injected by the dep connect blocks below.
 
       worker:
-        image: alpine:3.19
-        command: ["sh", "-c", "while true; do echo 'worker running'; sleep 30; done"]
+        build:
+          context: ./src/Worker
         env:
           APP_ENV: development
-          DB_HOST: db
-          DB_PORT: "5432"
-          DB_PASSWORD: postgres
         dependsOn:
           - db
-          - cache
 
     deps:
       db:
         kind: postgres
-        version: "16"
+        # source: devx-labs/postgres  # optional — defaults to devx-labs/<kind>
+        version: "16.1.0"             # provider for PostgreSQL 16, provider release 1.0
+        image: postgres:16            # optional — provider's defaultImage is used if omitted
         env:
           POSTGRES_PASSWORD: postgres
           POSTGRES_DB: appdb
         ports:
           - "5432:5432"
         volume: "db-data:/var/lib/postgresql/data"
+        connect:
+          - service: api
+            # AI detects the right env var names by scanning ./src/Api.
+            # Override with an explicit env block if AI is not configured:
+            # env:
+            #   ConnectionStrings__DefaultConnection: "Host=${host};Port=${port};Database=${POSTGRES_DB};Username=postgres;Password=${POSTGRES_PASSWORD}"
+          - service: worker
+            env:
+              DATABASE_URL: "postgres://postgres:${POSTGRES_PASSWORD}@${host}:${port}/${POSTGRES_DB}"
 
       cache:
         kind: redis
-        version: "7"
+        version: "7.2.0"             # provider for Redis 7, provider release 2.0
+        # image omitted — provider's defaultImage (redis:7) is used
         ports:
           - "6379:6379"
+        connect:
+          - service: api
+            env:
+              REDIS_URL: "redis://${host}:${port}"
 
     hooks:
       afterUp:
@@ -72,23 +94,23 @@ profiles:
         image: myregistry.azurecr.io/my-app/api:latest
         env:
           APP_ENV: test
-          DB_HOST: db
-          DB_PORT: "5432"
-          DB_NAME: appdb
-          DB_USER: postgres
-          DB_PASSWORD: postgres
         dependsOn:
           - db
 
     deps:
       db:
         kind: postgres
-        version: "16"
+        version: "16.1.0"
+        image: postgres:16
         env:
           POSTGRES_PASSWORD: postgres
           POSTGRES_DB: appdb
         ports:
           - "5432:5432"
+        connect:
+          - service: api
+            env:
+              ConnectionStrings__DefaultConnection: "Host=${host};Port=${port};Database=${POSTGRES_DB};Username=postgres;Password=${POSTGRES_PASSWORD}"
 
     hooks:
       afterUp:
@@ -96,8 +118,6 @@ profiles:
           service: api
 
   # ── staging ───────────────────────────────────────────────────────────────
-  # Docker Compose on a remote VM / staging server with a real registry image.
-  # Run with: devx up --profile staging
   staging:
     runtime: compose
     services:
@@ -107,11 +127,6 @@ profiles:
           - "80:8080"
         env:
           APP_ENV: staging
-          DB_HOST: db
-          DB_PORT: "5432"
-          DB_NAME: appdb
-          DB_USER: postgres
-          DB_PASSWORD: "${DB_PASSWORD}"   # read from host environment
         dependsOn:
           - db
         health:
@@ -122,13 +137,18 @@ profiles:
     deps:
       db:
         kind: postgres
-        version: "16"
+        version: "16.1.0"
+        image: postgres:16
         env:
           POSTGRES_PASSWORD: "${DB_PASSWORD}"
           POSTGRES_DB: appdb
         ports:
           - "5432:5432"
         volume: "staging-db-data:/var/lib/postgresql/data"
+        connect:
+          - service: api
+            env:
+              ConnectionStrings__DefaultConnection: "Host=${host};Port=${port};Database=${POSTGRES_DB};Username=postgres;Password=${POSTGRES_PASSWORD}"
 
     hooks:
       afterUp:
@@ -137,7 +157,6 @@ profiles:
 
   # ── k8s ───────────────────────────────────────────────────────────────────
   # Kubernetes via kubectl. Run with: devx up --profile k8s
-  # Images must already exist in the registry — devx does not build for k8s.
   k8s:
     runtime: k8s
     services:
@@ -147,11 +166,6 @@ profiles:
           - "80:8080"
         env:
           APP_ENV: production
-          DB_HOST: db
-          DB_PORT: "5432"
-          DB_NAME: appdb
-          DB_USER: postgres
-          DB_PASSWORD: postgres
         dependsOn:
           - db
 
@@ -159,18 +173,23 @@ profiles:
         image: myregistry.azurecr.io/my-app/worker:latest
         env:
           APP_ENV: production
-          DB_HOST: db
-          DB_PORT: "5432"
-          DB_PASSWORD: postgres
         dependsOn:
           - db
 
     deps:
       db:
         kind: postgres
-        version: "16"
+        version: "16.1.0"
+        image: postgres:16
         env:
           POSTGRES_PASSWORD: postgres
           POSTGRES_DB: appdb
         ports:
           - "5432:5432"
+        connect:
+          - service: api
+            env:
+              ConnectionStrings__DefaultConnection: "Host=${host};Port=${port};Database=${POSTGRES_DB};Username=postgres;Password=${POSTGRES_PASSWORD}"
+          - service: worker
+            env:
+              DATABASE_URL: "postgres://postgres:${POSTGRES_PASSWORD}@${host}:${port}/${POSTGRES_DB}"

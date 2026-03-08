@@ -33,6 +33,8 @@ func runUp(ctx context.Context, args []string) error {
 
 	lockfile, _ := lock.Load(lockFile)
 
+	ensureProviders(manifest, prof)
+
 	if err := ensureDevxDir(); err != nil {
 		return err
 	}
@@ -73,6 +75,8 @@ func runUp(ctx context.Context, args []string) error {
 }
 
 func runUpK8s(ctx context.Context, manifest *config.Manifest, profName string, prof *config.Profile) error {
+	prof = resolveDepImages(prof)
+	prof = resolveConnections(manifest, prof)
 	output, err := k8s.Render(manifest, profName, prof, "")
 	if err != nil {
 		return err

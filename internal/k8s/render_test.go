@@ -17,7 +17,7 @@ func TestRenderK8s(t *testing.T) {
 			"api": {Image: "nginx:alpine", Ports: []string{"8080:80"}},
 		},
 		Deps: map[string]config.Dep{
-			"db": {Kind: "postgres", Version: "16", Ports: []string{"5432:5432"}},
+			"db": {Image: "postgres:16", Ports: []string{"5432:5432"}},
 		},
 	}
 

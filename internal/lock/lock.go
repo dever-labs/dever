@@ -8,12 +8,24 @@ import (
 )
 
 type Lockfile struct {
-	Version int               `json:"version"`
-	Images  map[string]string `json:"images"`
+	Version   int                    `json:"version"`
+	Images    map[string]string      `json:"images"`
+	Providers map[string]ProviderPin `json:"providers,omitempty"`
+}
+
+// ProviderPin records the resolved version and SHA-256 digest of a provider
+// binary so that devx up can verify the cached binary is untampered.
+type ProviderPin struct {
+	Version string `json:"version"`
+	SHA256  string `json:"sha256"`
 }
 
 func New() *Lockfile {
-	return &Lockfile{Version: 1, Images: map[string]string{}}
+	return &Lockfile{
+		Version:   1,
+		Images:    map[string]string{},
+		Providers: map[string]ProviderPin{},
+	}
 }
 
 func Load(path string) (*Lockfile, error) {
@@ -29,6 +41,9 @@ func Load(path string) (*Lockfile, error) {
 
 	if lf.Images == nil {
 		lf.Images = map[string]string{}
+	}
+	if lf.Providers == nil {
+		lf.Providers = map[string]ProviderPin{}
 	}
 
 	return &lf, nil

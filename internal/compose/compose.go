@@ -50,11 +50,17 @@ type Healthcheck struct {
 type RewriteOptions struct {
 	RegistryPrefix string
 	Lockfile       *lock.Lockfile
+	// DepFragments holds optional provider-contributed configuration keyed by
+	// dep name. If a fragment is present for a dep, its fields are merged into
+	// the rendered compose service (e.g. a healthcheck).
+	DepFragments map[string]*DepFragment
 }
 
-var depImages = map[string]string{
-	"postgres": "postgres",
-	"redis":    "redis",
+// DepFragment is the optional provider-contributed configuration for a dep
+// service. Fields present in the fragment are merged into the base service
+// rendered from the dep's own devx.yaml config.
+type DepFragment struct {
+	Healthcheck *Healthcheck `json:"healthcheck,omitempty"`
 }
 
 func Render(manifest *config.Manifest, profileName string, profile *config.Profile, rewrite RewriteOptions, enableTelemetry bool) (string, error) {
@@ -70,11 +76,7 @@ func Render(manifest *config.Manifest, profileName string, profile *config.Profi
 
 	for _, name := range util.SortedKeys(profile.Deps) {
 		dep := profile.Deps[name]
-		image := depImages[dep.Kind]
-		if dep.Version != "" {
-			image = image + ":" + dep.Version
-		}
-		image = rewriteImage(image, rewrite)
+		image := rewriteImage(dep.Image, rewrite)
 
 		svc := Service{
 			Image:       image,
@@ -90,6 +92,13 @@ func Render(manifest *config.Manifest, profileName string, profile *config.Profi
 			volumeName := strings.SplitN(dep.Volume, ":", 2)[0]
 			if volumeName != "" {
 				file.Volumes[volumeName] = Volume{}
+			}
+		}
+
+		// Merge any provider-contributed configuration (e.g. healthcheck).
+		if rewrite.DepFragments != nil {
+			if frag, ok := rewrite.DepFragments[name]; ok && frag != nil && frag.Healthcheck != nil {
+				svc.Healthcheck = frag.Healthcheck
 			}
 		}
 

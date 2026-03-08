@@ -54,6 +54,10 @@ func main() {
 		err = runRender(ctx, args)
 	case "lock":
 		err = runLock(ctx, args)
+	case "providers":
+		err = runProviders(ctx, args)
+	case "export":
+		err = runExport(ctx, args)
 	case "version", "--version", "-v":
 		fmt.Println("devx " + version)
 		return
@@ -85,5 +89,8 @@ func printUsage() {
 	fmt.Println("  devx render compose [--write] [--no-telemetry]")
 	fmt.Println("  devx render k8s [--profile name] [--namespace ns] [--write]")
 	fmt.Println("  devx lock update")
+	fmt.Println("  devx providers install")
+	fmt.Println("  devx providers list")
+	fmt.Println("  devx export --format compose|k8s|helm|terraform [--profile name] [--out dir]")
 	fmt.Println("  devx version")
 }

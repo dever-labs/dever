@@ -11,7 +11,22 @@ type Manifest struct {
 	Version  int                `yaml:"version"`
 	Project  Project            `yaml:"project"`
 	Registry Registry           `yaml:"registry"`
+	AI       *AIConfig          `yaml:"ai,omitempty"`
 	Profiles map[string]Profile `yaml:"profiles"`
+}
+
+// AIConfig holds optional AI provider settings used by 'devx export' and
+// automatic connection string detection via the dep connect block.
+// Credentials are read from environment variables:
+//
+//	openai:       OPENAI_API_KEY
+//	anthropic:    ANTHROPIC_API_KEY
+//	azure-openai: AZURE_OPENAI_KEY
+//	ollama:       no auth required
+type AIConfig struct {
+	Provider string `yaml:"provider"` // openai | anthropic | ollama | azure-openai
+	Model    string `yaml:"model"`
+	BaseURL  string `yaml:"baseURL,omitempty"` // override endpoint (e.g. Ollama or Azure)
 }
 
 type Project struct {
@@ -72,12 +87,44 @@ type Health struct {
 	Retries  int    `yaml:"retries"`
 }
 
+// Dep is a third-party dependency (database, cache, broker, …) that devx
+// runs as a container. The project fully controls which image to run via
+// Image.
+//
+// When Kind is set, devx downloads a provider plugin that contributes
+// behavioural logic (health checks, compose fragments, connection string
+// templates). Source defaults to "devx-labs/<kind>" if omitted. Version
+// follows the major-version convention: major = dep major version
+// (e.g. "16.1.0" = provider for PostgreSQL 16, provider patch release 1.0).
+//
+// The Connect block lists services that should have connection environment
+// variables injected automatically. Each entry can supply an explicit Env
+// mapping using ${host}, ${port}, or any dep env key as template variables.
+// If Env is omitted and AI is configured in the manifest, devx scans the
+// service source directory and uses the LLM to detect the correct env var names.
 type Dep struct {
-	Kind    string            `yaml:"kind"`
-	Version string            `yaml:"version"`
+	Kind    string `yaml:"kind,omitempty"`
+	Source  string `yaml:"source,omitempty"`
+	Version string `yaml:"version,omitempty"`
+	Image   string `yaml:"image,omitempty"`
+
 	Env     map[string]string `yaml:"env"`
 	Ports   []string          `yaml:"ports"`
 	Volume  string            `yaml:"volume"`
+	Connect []ConnectEntry    `yaml:"connect,omitempty"`
+}
+
+// ConnectEntry declares a service that a dep should inject connection
+// environment variables into. Env values support template variables:
+//   - ${host}   — the dep's service name within the compose network
+//   - ${port}   — the first container-side port declared in dep.ports
+//   - ${<KEY>}  — any key from the dep's own env block (e.g. ${POSTGRES_PASSWORD})
+//
+// If Env is omitted and devx.yaml has an ai block, devx calls the LLM to
+// detect appropriate env var names by scanning the service's build context.
+type ConnectEntry struct {
+	Service string            `yaml:"service"`
+	Env     map[string]string `yaml:"env,omitempty"`
 }
 
 func Load(path string) (*Manifest, error) {
