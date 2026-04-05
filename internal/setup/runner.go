@@ -1,0 +1,215 @@
+// Package setup implements tool checking/installation and host-side setup steps
+// for the `devx setup` and `devx doctor --fix` workflows.
+package setup
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"os/exec"
+	goruntime "runtime"
+	"strings"
+
+	"github.com/dever-labs/devx/internal/config"
+)
+
+// Result describes the outcome of a single tool check or setup step.
+type Result struct {
+	Name   string `json:"name"`
+	Type   string `json:"type"`   // "tool" | "step"
+	Status string `json:"status"` // "ok" | "installed" | "skipped" | "not-applicable" | "missing" | "failed"
+	Detail string `json:"detail,omitempty"`
+}
+
+// Options controls setup behaviour.
+type Options struct {
+	// Fix causes missing tools to be installed and runOnce steps to be re-run.
+	Fix bool
+}
+
+// CheckTool runs the tool's Check command and reports whether the tool is present.
+// Returns (true, versionOutput) on success, (false, errorDetail) on failure.
+func CheckTool(tool config.Tool) (bool, string) {
+	if tool.Check == "" {
+		return false, "no check command defined"
+	}
+	out, err := runShellCapture(tool.Check)
+	if err != nil {
+		return false, strings.TrimSpace(out)
+	}
+	return true, strings.TrimSpace(out)
+}
+
+// InstallTool runs the platform-appropriate install command for the given tool.
+// The install command is written to stderr so JSON stdout stays clean.
+func InstallTool(_ context.Context, tool config.Tool) error {
+	installCmd := platformInstall(tool.Install)
+	if installCmd == "" {
+		return fmt.Errorf("no install command defined for platform %s", goruntime.GOOS)
+	}
+	fmt.Fprintf(os.Stderr, "    $ %s\n", installCmd)
+	return runShellInherit(installCmd, "")
+}
+
+// RunTools checks every declared tool and installs any that are missing when
+// opts.Fix is true. Results are returned in declaration order.
+// Progress messages are written to stderr so that --json stdout stays clean.
+func RunTools(ctx context.Context, tools []config.Tool, opts Options) []Result {
+	var results []Result
+	for _, tool := range tools {
+		ok, detail := CheckTool(tool)
+		if ok {
+			results = append(results, Result{
+				Name:   tool.Name,
+				Type:   "tool",
+				Status: "ok",
+				Detail: detail,
+			})
+			continue
+		}
+		if !opts.Fix {
+			results = append(results, Result{
+				Name:   tool.Name,
+				Type:   "tool",
+				Status: "missing",
+				Detail: detail,
+			})
+			continue
+		}
+		fmt.Fprintf(os.Stderr, "  Installing %s...\n", tool.Name)
+		if err := InstallTool(ctx, tool); err != nil {
+			results = append(results, Result{
+				Name:   tool.Name,
+				Type:   "tool",
+				Status: "failed",
+				Detail: err.Error(),
+			})
+			continue
+		}
+		// Re-check after install to confirm success.
+		ok2, detail2 := CheckTool(tool)
+		if ok2 {
+			results = append(results, Result{
+				Name:   tool.Name,
+				Type:   "tool",
+				Status: "installed",
+				Detail: detail2,
+			})
+		} else {
+			results = append(results, Result{
+				Name:   tool.Name,
+				Type:   "tool",
+				Status: "failed",
+				Detail: "installed but check still fails: " + detail2,
+			})
+		}
+	}
+	return results
+}
+
+// RunSteps executes setup steps in declaration order.
+// RunOnce steps whose command hash matches the stored state are skipped unless
+// opts.Fix is true.
+// Progress messages are written to stderr so that --json stdout stays clean.
+func RunSteps(steps []config.SetupStep, opts Options) []Result {
+	state := loadState()
+	var results []Result
+	for _, step := range steps {
+		// Platform filter
+		if !matchesPlatform(step.Platform) {
+			results = append(results, Result{
+				Name:   step.Name,
+				Type:   "step",
+				Status: "not-applicable",
+				Detail: fmt.Sprintf("skipped (platform: %s)", step.Platform),
+			})
+			continue
+		}
+		// RunOnce idempotency check
+		if step.RunOnce && !opts.Fix {
+			if hasRunBefore(state, step.Name, step.Run, step.Workdir) {
+				results = append(results, Result{
+					Name:   step.Name,
+					Type:   "step",
+					Status: "skipped",
+					Detail: "already run (runOnce)",
+				})
+				continue
+			}
+		}
+		fmt.Fprintf(os.Stderr, "  [%s] %s\n", step.Name, step.Run)
+		if err := runShellInherit(step.Run, step.Workdir); err != nil {
+			results = append(results, Result{
+				Name:   step.Name,
+				Type:   "step",
+				Status: "failed",
+				Detail: err.Error(),
+			})
+			continue
+		}
+		markDone(state, step.Name, step.Run, step.Workdir)
+		results = append(results, Result{
+			Name:   step.Name,
+			Type:   "step",
+			Status: "ok",
+		})
+	}
+	_ = saveState(state)
+	return results
+}
+
+// platformInstall returns the install command for the current OS.
+func platformInstall(install config.Install) string {
+	switch goruntime.GOOS {
+	case "windows":
+		return install.Windows
+	case "darwin":
+		return install.MacOS
+	default:
+		return install.Linux
+	}
+}
+
+// matchesPlatform reports whether the given platform tag matches the current OS.
+// Returns false for unrecognised values — ValidateSetup is the correct gate.
+func matchesPlatform(platform string) bool {
+	switch platform {
+	case "", "all":
+		return true
+	case "windows":
+		return goruntime.GOOS == "windows"
+	case "macos", "darwin":
+		return goruntime.GOOS == "darwin"
+	case "linux":
+		return goruntime.GOOS == "linux"
+	}
+	return false
+}
+
+// runShellCapture runs a shell command and returns combined output + error.
+func runShellCapture(command string) (string, error) {
+	var cmd *exec.Cmd
+	if goruntime.GOOS == "windows" {
+		cmd = exec.Command("cmd", "/c", command)
+	} else {
+		cmd = exec.Command("sh", "-c", command)
+	}
+	out, err := cmd.CombinedOutput()
+	return string(out), err
+}
+
+// runShellInherit runs a shell command with stdout/stderr inherited (visible to user).
+func runShellInherit(command, workdir string) error {
+	var cmd *exec.Cmd
+	if goruntime.GOOS == "windows" {
+		cmd = exec.Command("cmd", "/c", command)
+	} else {
+		cmd = exec.Command("sh", "-c", command)
+	}
+	if workdir != "" {
+		cmd.Dir = workdir
+	}
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}

@@ -126,3 +126,45 @@ func existsServiceOrDep(prof Profile, name string) bool {
 	}
 	return false
 }
+
+// ValidateTools checks that all tool declarations are well-formed.
+func ValidateTools(m *Manifest) error {
+	var issues []string
+	for i, t := range m.Tools {
+		if t.Name == "" {
+			issues = append(issues, fmt.Sprintf("tools[%d]: name is required", i))
+		}
+		if t.Check == "" {
+			label := t.Name
+			if label == "" {
+				label = fmt.Sprintf("[%d]", i)
+			}
+			issues = append(issues, fmt.Sprintf("tool '%s': check is required", label))
+		}
+	}
+	if len(issues) > 0 {
+		return &ValidationError{Issues: issues}
+	}
+	return nil
+}
+
+// ValidateSetup checks that all setup step declarations are well-formed.
+func ValidateSetup(m *Manifest) error {
+	var issues []string
+	validPlatforms := map[string]bool{"": true, "all": true, "windows": true, "linux": true, "macos": true, "darwin": true}
+	for i, s := range m.Setup {
+		if s.Name == "" {
+			issues = append(issues, fmt.Sprintf("setup[%d]: name is required", i))
+		}
+		if s.Run == "" {
+			issues = append(issues, fmt.Sprintf("setup step '%s': run is required", s.Name))
+		}
+		if !validPlatforms[s.Platform] {
+			issues = append(issues, fmt.Sprintf("setup step '%s': platform must be all, windows, linux, or macos", s.Name))
+		}
+	}
+	if len(issues) > 0 {
+		return &ValidationError{Issues: issues}
+	}
+	return nil
+}

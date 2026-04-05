@@ -11,7 +11,8 @@ import (
 
 func runDoctor(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("doctor", flag.ExitOnError)
-	fix := fs.Bool("fix", false, "Attempt fixes")
+	fix := fs.Bool("fix", false, "Attempt to install missing tools and fix issues")
+	outputJSON := fs.Bool("json", false, "Emit report as JSON")
 	_ = fs.Parse(args)
 
 	manifest, _, _, _ := loadProfile("")
@@ -21,9 +22,10 @@ func runDoctor(ctx context.Context, args []string) error {
 		Fix:      *fix,
 	})
 
-	doctor.PrintReport(os.Stdout, report)
+	doctor.PrintReport(os.Stdout, report, *outputJSON)
 	if report.HasFailures() {
 		return errors.New("doctor found failures")
 	}
 	return nil
 }
+

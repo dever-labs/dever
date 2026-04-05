@@ -68,17 +68,30 @@ Available services:
 | Command | Description |
 |---|---|
 | `devx init` | Scaffold a starter `devx.yaml` in the current directory |
+| `devx setup` | Install required tools and run host-side setup steps |
 | `devx up` | Start all services for the active profile |
 | `devx down` | Stop and remove containers |
 | `devx status` | Show running containers, state, and published ports |
 | `devx logs [service]` | Stream logs from one or all services |
 | `devx exec <service> -- <cmd>` | Run a command inside a running service |
-| `devx doctor` | Check runtime prerequisites |
+| `devx doctor` | Check runtime and tool prerequisites |
+| `devx validate` | Validate `devx.yaml` schema and configuration |
 | `devx render compose` | Print the generated Docker Compose file |
 | `devx render k8s` | Render Kubernetes manifests from a profile |
 | `devx lock update` | Resolve and pin image digests to `devx.lock` |
 
 ### Flags
+
+**`devx setup`**
+- `--fix` — install missing tools and re-run `runOnce` steps
+- `--json` — emit results as JSON (AI/CI friendly)
+
+**`devx doctor`**
+- `--fix` — install missing tools declared in the `tools` block
+- `--json` — emit report as JSON
+
+**`devx validate`**
+- `--file <path>` — path to `devx.yaml` (default: `./devx.yaml`)
 
 **`devx up`**
 - `--profile <name>` — select a profile (default: `defaultProfile` in devx.yaml)
@@ -104,7 +117,72 @@ Available services:
 - `--write` — write to `.devx/k8s.yaml`
 
 **`devx doctor`**
-- `--fix` — attempt to auto-fix detected issues
+- `--fix` — install missing tools and attempt to fix detected issues
+- `--json` — emit report as JSON
+
+## Tools and setup
+
+devx can install required SDKs and run host-side setup steps before you start containers.
+
+### Declaring required tools
+
+Add a `tools` block to `devx.yaml`. devx checks each tool with its `check` command and installs it using the platform-appropriate `install` command when `devx setup --fix` or `devx doctor --fix` is run.
+
+```yaml
+tools:
+  - name: node
+    version: "20"
+    check: "node --version"
+    install:
+      windows: "winget install OpenJS.NodeJS.LTS"
+      macos: "brew install node@20"
+      linux: "curl -fsSL https://deb.nodesource.com/setup_20.x | sudo bash - && apt-get install -y nodejs"
+
+  - name: dotnet
+    version: "8"
+    check: "dotnet --version"
+    install:
+      windows: "winget install Microsoft.DotNet.SDK.8"
+      macos: "brew install dotnet@8"
+      linux: "wget https://dot.net/v1/dotnet-install.sh -O install.sh && bash install.sh --version 8.0"
+```
+
+### Declaring setup steps
+
+Add a `setup` block to `devx.yaml` for host-side commands that run after tools are installed. Steps with `runOnce: true` are skipped on subsequent runs if their command hasn't changed (tracked in `.devx/setup-state.json`).
+
+```yaml
+setup:
+  - name: restore-frontend
+    run: "npm install"
+    workdir: ./frontend
+    runOnce: true         # skip if already run and command unchanged
+
+  - name: restore-backend
+    run: "dotnet restore"
+    workdir: ./src
+    runOnce: true
+
+  - name: db-migrate
+    run: "dotnet ef database update --project src/Api"
+    platform: all         # all | windows | linux | macos (default: all)
+```
+
+### Running setup
+
+```sh
+devx setup          # check tools + run pending steps
+devx setup --fix    # also install missing tools + re-run runOnce steps
+devx setup --json   # machine-readable output (for AI/CI)
+```
+
+### Doctor workflow
+
+```sh
+devx doctor         # check container runtime + declared tools
+devx doctor --fix   # attempt to install any missing tools
+devx doctor --json  # structured JSON report for AI agents
+```
 
 ## devx.yaml reference
 

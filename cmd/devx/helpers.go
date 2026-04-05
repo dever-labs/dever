@@ -26,6 +26,12 @@ import (
 	"github.com/dever-labs/devx/internal/runtime/podman"
 )
 
+// loadManifestOnly loads and parses devx.yaml without resolving a profile.
+// Use this when a command doesn't need a specific profile (e.g. setup, validate).
+func loadManifestOnly() (*config.Manifest, error) {
+	return config.Load(manifestFile)
+}
+
 func loadProfile(profile string) (*config.Manifest, string, *config.Profile, error) {
 	manifest, err := config.Load(manifestFile)
 	if err != nil {

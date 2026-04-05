@@ -20,6 +20,45 @@ ai:
   provider: openai
   model: gpt-4o-mini
 
+# ── tools ─────────────────────────────────────────────────────────────────────
+# Declare required SDKs, runtimes, and CLI tools.
+# Run `devx doctor` to check. Run `devx setup --fix` to install missing tools.
+tools:
+  - name: node
+    version: "20"
+    check: "node --version"
+    install:
+      windows: "winget install OpenJS.NodeJS.LTS"
+      macos: "brew install node@20"
+      linux: "curl -fsSL https://deb.nodesource.com/setup_20.x | sudo bash - && apt-get install -y nodejs"
+
+  - name: dotnet
+    version: "8"
+    check: "dotnet --version"
+    install:
+      windows: "winget install Microsoft.DotNet.SDK.8"
+      macos: "brew install dotnet@8"
+      linux: "wget https://dot.net/v1/dotnet-install.sh -O install.sh && bash install.sh --version 8.0"
+
+# ── setup ─────────────────────────────────────────────────────────────────────
+# Host-side commands run in order by `devx setup`.
+# runOnce steps are skipped if their command hash hasn't changed since last run.
+setup:
+  - name: restore-frontend
+    run: "npm install"
+    workdir: ./frontend
+    runOnce: true
+
+  - name: restore-backend
+    run: "dotnet restore"
+    workdir: ./src
+    runOnce: true
+
+  - name: generate-certs
+    run: "mkcert -install && mkcert localhost 127.0.0.1"
+    runOnce: true
+    platform: all
+
 profiles:
 
   # ── local ─────────────────────────────────────────────────────────────────

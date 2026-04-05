@@ -2,6 +2,7 @@ package doctor
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
 	"os"
@@ -15,6 +16,7 @@ import (
 	"github.com/dever-labs/devx/internal/runtime"
 	"github.com/dever-labs/devx/internal/runtime/docker"
 	"github.com/dever-labs/devx/internal/runtime/podman"
+	"github.com/dever-labs/devx/internal/setup"
 )
 
 type Options struct {
@@ -23,9 +25,9 @@ type Options struct {
 }
 
 type Check struct {
-	Name   string
-	Status string
-	Detail string
+	Name   string `json:"name"`
+	Status string `json:"status"`
+	Detail string `json:"detail,omitempty"`
 }
 
 type Report struct {
@@ -79,6 +81,9 @@ func Run(ctx context.Context, opts Options) Report {
 		if requiresK8s(opts.Manifest) {
 			checks = append(checks, checkKubectl())
 		}
+		// Check tools declared in the manifest.
+		toolChecks := checkTools(ctx, opts.Manifest, opts.Fix)
+		checks = append(checks, toolChecks...)
 	}
 
 	sort.SliceStable(checks, func(i, j int) bool {
@@ -88,10 +93,64 @@ func Run(ctx context.Context, opts Options) Report {
 	return Report{Checks: checks}
 }
 
-func PrintReport(out *os.File, report Report) {
-	for _, check := range report.Checks {
-		fmt.Fprintf(out, "%s\t%s\t%s\n", check.Status, check.Name, check.Detail)
+func PrintReport(out *os.File, report Report, asJSON bool) {
+	if asJSON {
+		data, err := json.MarshalIndent(report.Checks, "", "  ")
+		if err != nil {
+			fmt.Fprintf(out, "error encoding JSON: %v\n", err)
+			return
+		}
+		fmt.Fprintln(out, string(data))
+		return
 	}
+	for _, check := range report.Checks {
+		icon := doctorIcon(check.Status)
+		if check.Detail != "" {
+			fmt.Fprintf(out, "%s  %-30s  %s\n", icon, check.Name, check.Detail)
+		} else {
+			fmt.Fprintf(out, "%s  %s\n", icon, check.Name)
+		}
+	}
+}
+
+func doctorIcon(status string) string {
+	switch status {
+	case "PASS":
+		return "✓"
+	case "WARN":
+		return "!"
+	default:
+		return "✗"
+	}
+}
+
+// checkTools checks each tool declared in the manifest. If fix is true,
+// missing tools are installed via devx/setup before reporting.
+func checkTools(ctx context.Context, m *config.Manifest, fix bool) []Check {
+	if len(m.Tools) == 0 {
+		return nil
+	}
+	opts := setup.Options{Fix: fix}
+	results := setup.RunTools(ctx, m.Tools, opts)
+	checks := make([]Check, 0, len(results))
+	for _, r := range results {
+		label := fmt.Sprintf("Tool: %s", r.Name)
+		switch r.Status {
+		case "ok", "installed":
+			checks = append(checks, Check{Name: label, Status: "PASS", Detail: r.Detail})
+		case "missing":
+			hint := r.Detail
+			if hint == "" {
+				hint = "not found — run 'devx setup --fix' to install"
+			}
+			checks = append(checks, Check{Name: label, Status: "FAIL", Detail: hint})
+		case "failed":
+			checks = append(checks, Check{Name: label, Status: "FAIL", Detail: r.Detail})
+		default:
+			checks = append(checks, Check{Name: label, Status: "WARN", Detail: r.Detail})
+		}
+	}
+	return checks
 }
 
 func detectAllRuntimes(ctx context.Context) []runtime.RuntimeInfo {
@@ -186,3 +245,4 @@ func checkKubectl() Check {
 
 	return Check{Name: "kubectl", Status: "PASS", Detail: "kubectl available"}
 }
+

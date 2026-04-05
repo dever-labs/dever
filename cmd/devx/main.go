@@ -50,6 +50,10 @@ func main() {
 		err = runExec(ctx, args)
 	case "doctor":
 		err = runDoctor(ctx, args)
+	case "setup":
+		err = runSetup(ctx, args)
+	case "validate":
+		err = runValidate(args)
 	case "render":
 		err = runRender(ctx, args)
 	case "lock":
@@ -80,12 +84,14 @@ func printUsage() {
 	fmt.Println("devx - cross-platform dev orchestrator")
 	fmt.Println("\nUsage:")
 	fmt.Println("  devx init")
+	fmt.Println("  devx setup [--fix] [--json]")
 	fmt.Println("  devx up [--profile local|ci|k8s] [--build] [--pull] [--no-telemetry]")
 	fmt.Println("  devx down [--volumes]")
-	fmt.Println("  devx status")
+	fmt.Println("  devx status [--json]")
 	fmt.Println("  devx logs [service] [--follow] [--since 10m] [--json]")
 	fmt.Println("  devx exec <service> -- <cmd...>")
-	fmt.Println("  devx doctor [--fix]")
+	fmt.Println("  devx doctor [--fix] [--json]")
+	fmt.Println("  devx validate [--file path]")
 	fmt.Println("  devx render compose [--write] [--no-telemetry]")
 	fmt.Println("  devx render k8s [--profile name] [--namespace ns] [--write]")
 	fmt.Println("  devx lock update")

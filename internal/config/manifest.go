@@ -13,6 +13,12 @@ type Manifest struct {
 	Registry Registry           `yaml:"registry"`
 	AI       *AIConfig          `yaml:"ai,omitempty"`
 	Profiles map[string]Profile `yaml:"profiles"`
+	// Tools declares required SDKs, runtimes, and CLI tools for the project.
+	// Use `devx doctor` to check and `devx setup` (or `devx doctor --fix`) to install.
+	Tools []Tool `yaml:"tools,omitempty"`
+	// Setup declares ordered host-side commands to run after tool installation.
+	// Use `devx setup` to execute. RunOnce steps are skipped when unchanged.
+	Setup []SetupStep `yaml:"setup,omitempty"`
 }
 
 // AIConfig holds optional AI provider settings used by 'devx export' and
