@@ -1,0 +1,16 @@
+run:
+  timeout: 5m
+
+linters:
+  disable-all: true
+  enable:
+    - govet       # Same as go vet — catches correctness issues
+    - ineffassign # Detects assignments whose result is never used
+    - staticcheck # Comprehensive static analysis (SA, S1, QF rules)
+    - misspell    # Catches common English misspellings in comments/strings
+
+issues:
+  exclude-rules:
+    # Ignore deliberate error discards in flag parsing (ExitOnError handles panics).
+    - source: "fs\\.Parse"
+      linters: [ errcheck ]

@@ -5,6 +5,7 @@ package setup
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	goruntime "runtime"
@@ -25,6 +26,17 @@ type Result struct {
 type Options struct {
 	// Fix causes missing tools to be installed and runOnce steps to be re-run.
 	Fix bool
+	// Stdout is where subprocess stdout is routed. Defaults to os.Stdout when nil.
+	// Set to os.Stderr in --json mode to keep JSON stdout clean.
+	Stdout io.Writer
+}
+
+// stepOut returns the effective stdout destination for subprocess output.
+func (o Options) stepOut() io.Writer {
+	if o.Stdout != nil {
+		return o.Stdout
+	}
+	return os.Stdout
 }
 
 // CheckTool runs the tool's Check command and reports whether the tool is present.
@@ -41,14 +53,15 @@ func CheckTool(tool config.Tool) (bool, string) {
 }
 
 // InstallTool runs the platform-appropriate install command for the given tool.
-// The install command is written to stderr so JSON stdout stays clean.
-func InstallTool(_ context.Context, tool config.Tool) error {
+// Subprocess stdout is routed via opts.Stdout (defaults to os.Stdout).
+// Install progress lines are written to stderr so JSON stdout stays clean.
+func InstallTool(_ context.Context, tool config.Tool, opts Options) error {
 	installCmd := platformInstall(tool.Install)
 	if installCmd == "" {
 		return fmt.Errorf("no install command defined for platform %s", goruntime.GOOS)
 	}
 	fmt.Fprintf(os.Stderr, "    $ %s\n", installCmd)
-	return runShellInherit(installCmd, "")
+	return runShellInherit(installCmd, "", opts.stepOut())
 }
 
 // RunTools checks every declared tool and installs any that are missing when
@@ -77,7 +90,7 @@ func RunTools(ctx context.Context, tools []config.Tool, opts Options) []Result {
 			continue
 		}
 		fmt.Fprintf(os.Stderr, "  Installing %s...\n", tool.Name)
-		if err := InstallTool(ctx, tool); err != nil {
+		if err := InstallTool(ctx, tool, opts); err != nil {
 			results = append(results, Result{
 				Name:   tool.Name,
 				Type:   "tool",
@@ -138,7 +151,7 @@ func RunSteps(steps []config.SetupStep, opts Options) []Result {
 			}
 		}
 		fmt.Fprintf(os.Stderr, "  [%s] %s\n", step.Name, step.Run)
-		if err := runShellInherit(step.Run, step.Workdir); err != nil {
+		if err := runShellInherit(step.Run, step.Workdir, opts.stepOut()); err != nil {
 			results = append(results, Result{
 				Name:   step.Name,
 				Type:   "step",
@@ -198,8 +211,9 @@ func runShellCapture(command string) (string, error) {
 	return string(out), err
 }
 
-// runShellInherit runs a shell command with stdout/stderr inherited (visible to user).
-func runShellInherit(command, workdir string) error {
+// runShellInherit runs a shell command with stdout routed to the given writer
+// and stderr inherited from the parent process (visible to user).
+func runShellInherit(command, workdir string, stdout io.Writer) error {
 	var cmd *exec.Cmd
 	if goruntime.GOOS == "windows" {
 		cmd = exec.Command("cmd", "/c", command)
@@ -209,7 +223,7 @@ func runShellInherit(command, workdir string) error {
 	if workdir != "" {
 		cmd.Dir = workdir
 	}
-	cmd.Stdout = os.Stdout
+	cmd.Stdout = stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
 }

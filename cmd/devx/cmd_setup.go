@@ -22,6 +22,10 @@ func runSetup(ctx context.Context, args []string) error {
 	}
 
 	opts := setup.Options{Fix: *fix}
+	if *outputJSON {
+		// Route subprocess stdout to stderr so JSON stdout stays clean.
+		opts.Stdout = os.Stderr
+	}
 	allResults := []setup.Result{}
 
 	if len(manifest.Tools) > 0 {
