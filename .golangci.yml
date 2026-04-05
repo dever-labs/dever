@@ -1,8 +1,10 @@
+version: "2"
+
 run:
   timeout: 5m
 
 linters:
-  disable-all: true
+  default: none
   enable:
     - govet       # Same as go vet — catches correctness issues
     - ineffassign # Detects assignments whose result is never used
