@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -371,26 +372,43 @@ func serviceLabel(name string) string {
 
 // runHooks executes a slice of lifecycle hooks sequentially, stopping on first error.
 // exec hooks run a command inside a running container; run hooks run a host shell command.
-func runHooks(ctx context.Context, rt devxruntime.Runtime, composePath, projectName string, hooks []config.Hook) error {
+// run hooks with background:true are started without waiting and their *exec.Cmd is
+// returned so the caller can stream output and wait on them later.
+func runHooks(ctx context.Context, rt devxruntime.Runtime, composePath, projectName string, hooks []config.Hook) ([]*exec.Cmd, error) {
+	var bgCmds []*exec.Cmd
 	for i, h := range hooks {
 		if h.Exec != "" {
 			fmt.Printf("  [hook %d] exec in %s: %s\n", i+1, h.Service, h.Exec)
 			cmd := strings.Fields(h.Exec)
 			code, err := rt.Exec(ctx, composePath, projectName, h.Service, cmd)
 			if err != nil {
-				return fmt.Errorf("hook %d exec failed: %w", i+1, err)
+				return bgCmds, fmt.Errorf("hook %d exec failed: %w", i+1, err)
 			}
 			if code != 0 {
-				return fmt.Errorf("hook %d exec exited with code %d", i+1, code)
+				return bgCmds, fmt.Errorf("hook %d exec exited with code %d", i+1, code)
 			}
+		} else if h.Background {
+			label := h.Name
+			if label == "" {
+				label = h.Run
+				if len(label) > 40 {
+					label = label[:40]
+				}
+			}
+			fmt.Printf("  [hook %d] run (background): %s\n", i+1, h.Run)
+			cmd, err := runShellCommandBackground(h.Run, label)
+			if err != nil {
+				return bgCmds, fmt.Errorf("hook %d background run failed: %w", i+1, err)
+			}
+			bgCmds = append(bgCmds, cmd)
 		} else {
 			fmt.Printf("  [hook %d] run: %s\n", i+1, h.Run)
 			if err := runShellCommand(h.Run); err != nil {
-				return fmt.Errorf("hook %d run failed: %w", i+1, err)
+				return bgCmds, fmt.Errorf("hook %d run failed: %w", i+1, err)
 			}
 		}
 	}
-	return nil
+	return bgCmds, nil
 }
 
 // runShellCommand runs a command string via the system shell with stdout/stderr inherited.
@@ -404,6 +422,91 @@ func runShellCommand(command string) error {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
+}
+
+// runShellCommandBackground starts a command via the system shell without waiting for it
+// to exit. stdout and stderr are streamed to the terminal with a label prefix.
+func runShellCommandBackground(command, label string) (*exec.Cmd, error) {
+	var cmd *exec.Cmd
+	if runtime.GOOS == "windows" {
+		cmd = exec.Command("cmd", "/c", command)
+	} else {
+		cmd = exec.Command("sh", "-c", command)
+	}
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, err
+	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return nil, err
+	}
+
+	if err := cmd.Start(); err != nil {
+		return nil, err
+	}
+
+	prefix := fmt.Sprintf("[%s] ", label)
+	go streamWithPrefix(stdout, os.Stdout, prefix)
+	go streamWithPrefix(stderr, os.Stderr, prefix)
+
+	return cmd, nil
+}
+
+// streamWithPrefix reads lines from r and writes them to w with a label prefix.
+func streamWithPrefix(r io.Reader, w io.Writer, prefix string) {
+	scanner := bufio.NewScanner(r)
+	for scanner.Scan() {
+		fmt.Fprintf(w, "%s%s\n", prefix, scanner.Text())
+	}
+}
+
+// waitForBackground blocks until all background processes exit or the user interrupts.
+// On interrupt, each process receives SIGINT and is force-killed after a short grace period.
+func waitForBackground(cmds []*exec.Cmd) {
+	if len(cmds) == 0 {
+		return
+	}
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, os.Interrupt)
+	defer signal.Stop(sigCh)
+
+	doneCh := make(chan struct{}, len(cmds))
+	for _, cmd := range cmds {
+		cmd := cmd
+		go func() {
+			cmd.Wait() //nolint:errcheck // exit code of background process is informational
+			doneCh <- struct{}{}
+		}()
+	}
+
+	remaining := len(cmds)
+	for {
+		select {
+		case <-sigCh:
+			fmt.Println("\nStopping background processes...")
+			for _, cmd := range cmds {
+				if cmd.Process != nil {
+					cmd.Process.Signal(os.Interrupt) //nolint:errcheck
+				}
+			}
+			// Grace period, then force kill.
+			time.Sleep(3 * time.Second)
+			for _, cmd := range cmds {
+				if cmd.Process != nil {
+					cmd.Process.Kill() //nolint:errcheck
+				}
+			}
+			return
+		case <-doneCh:
+			remaining--
+			if remaining == 0 {
+				return
+			}
+		}
+	}
 }
 
 // loadLockfile loads devx.lock if it exists, returning nil without error when absent.

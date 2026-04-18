@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 
 	"github.com/dever-labs/devx/internal/config"
@@ -58,9 +59,12 @@ func runUp(ctx context.Context, args []string) error {
 		return err
 	}
 
+	var bgCmds []*exec.Cmd
 	if len(prof.Hooks.AfterUp) > 0 {
 		fmt.Println("Running afterUp hooks...")
-		if err := runHooks(ctx, rt, composePath, manifest.Project.Name, prof.Hooks.AfterUp); err != nil {
+		var err error
+		bgCmds, err = runHooks(ctx, rt, composePath, manifest.Project.Name, prof.Hooks.AfterUp)
+		if err != nil {
 			return err
 		}
 	}
@@ -71,6 +75,12 @@ func runUp(ctx context.Context, args []string) error {
 
 	fmt.Println("Environment is up")
 	printLinks(ctx, rt, composePath, manifest.Project.Name)
+
+	if len(bgCmds) > 0 {
+		fmt.Println("\nBackground processes running — Ctrl+C to stop.")
+		waitForBackground(bgCmds)
+	}
+
 	return nil
 }
 

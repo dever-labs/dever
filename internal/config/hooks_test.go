@@ -145,3 +145,65 @@ profiles:
 		t.Fatal("expected error: run hook should not set service")
 	}
 }
+
+func TestValidateHooks_BackgroundRun(t *testing.T) {
+	data := []byte(`version: 1
+project:
+  name: my-app
+  defaultProfile: local
+profiles:
+  local:
+    runtime: compose
+    hooks:
+      afterUp:
+        - run: "pnpm dev"
+          background: true
+          name: dev
+    services:
+      api:
+        image: nginx:alpine
+`)
+
+	m, err := Parse(data)
+	if err != nil {
+		t.Fatalf("parse failed: %v", err)
+	}
+	if err := ValidateProfile(m, "local"); err != nil {
+		t.Fatalf("expected valid background run hook, got: %v", err)
+	}
+	h := m.Profiles["local"].Hooks.AfterUp[0]
+	if !h.Background {
+		t.Error("expected Background to be true")
+	}
+	if h.Name != "dev" {
+		t.Errorf("expected Name 'dev', got %q", h.Name)
+	}
+}
+
+func TestValidateHooks_BackgroundOnExec(t *testing.T) {
+	data := []byte(`version: 1
+project:
+  name: my-app
+  defaultProfile: local
+profiles:
+  local:
+    runtime: compose
+    hooks:
+      afterUp:
+        - exec: "migrate up"
+          service: api
+          background: true
+    services:
+      api:
+        image: nginx:alpine
+`)
+
+	m, err := Parse(data)
+	if err != nil {
+		t.Fatalf("parse failed: %v", err)
+	}
+	if err := ValidateProfile(m, "local"); err == nil {
+		t.Fatal("expected error: background is not supported for exec hooks")
+	}
+}
+

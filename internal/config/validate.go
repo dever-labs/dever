@@ -109,6 +109,12 @@ func ValidateProfile(m *Manifest, profile string) error {
 		if hasRun && h.Service != "" {
 			issues = append(issues, fmt.Sprintf("hook[%d] run does not use service", i))
 		}
+		if h.Background && hasExec {
+			issues = append(issues, fmt.Sprintf("hook[%d] background is only supported for run hooks", i))
+		}
+		if h.Name != "" && hasExec {
+			issues = append(issues, fmt.Sprintf("hook[%d] name is only supported for run hooks", i))
+		}
 	}
 
 	if len(issues) > 0 {

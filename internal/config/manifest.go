@@ -62,12 +62,17 @@ type Hooks struct {
 //	exec: runs a command inside an already-running container via `docker compose exec`.
 //	      Service is required.
 //	run:  runs a command on the host via the system shell.
+//	      Set background: true to start the process without waiting for it to exit.
+//	      devx up will stream its output (prefixed with name) and block until it stops.
+//	      Use name to label output lines; defaults to the run command.
 type Hook struct {
 	// Exec is the command to run inside Service (e.g. "migrate up").
 	Exec    string `yaml:"exec"`
 	Service string `yaml:"service"`
 	// Run is a host-side shell command (e.g. "./scripts/seed.sh").
-	Run string `yaml:"run"`
+	Run        string `yaml:"run"`
+	Background bool   `yaml:"background,omitempty"`
+	Name       string `yaml:"name,omitempty"`
 }
 
 type Service struct {
