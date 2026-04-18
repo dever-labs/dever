@@ -1,0 +1,26 @@
+{
+  "name": "devx",
+  // Central devcontainer image maintained by the platform team in:
+  //   github.com/dever-labs/devcontainers
+  // Includes: Go 1.24, Node.js LTS, Docker-in-Docker, kubectl, Helm, git, GitHub CLI.
+  "image": "ghcr.io/dever-labs/devcontainers/go-dev:latest",
+
+  "mounts": [
+    "source=dever-labs-gh-config,target=/home/vscode/.config/gh,type=volume"
+  ],
+
+  "remoteEnv": {
+    "GITHUB_TOKEN": "${localEnv:GITHUB_TOKEN}"
+  },
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "github.copilot",
+        "github.copilot-chat",
+        "anthropics.claude-code",
+        "golang.go"
+      ]
+    }
+  }
+}
